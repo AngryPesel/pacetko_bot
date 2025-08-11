@@ -457,14 +457,14 @@ def handle_feed(chat_id, user_id, username, arg_item):
 
                     # === Змінено: Умовні повідомлення для дельти ===
                     if d > 0:
-                        msg = f"Дав схрумкати паці {ITEMS[key]['u_name']}, і маєш приріст сальця!"
+                        msg = f"Дав схрумкати {pet_name} {ITEMS[key]['u_name']}, і маєш приріст сальця!"
                     elif d < 0:
-                        msg = f"Пацєтко з'їло {ITEMS[key]['u_name']} і щось пішло не так. Паця просралося і вага зменшилася - мінус сальце."
+                        msg = f"Пацєтко з'їло {ITEMS[key]['u_name']} і щось пішло не так. {pet_name} просралося і вага зменшилася - мінус сальце."
                     else:
                         msg = f"Накормив пацєтко {ITEMS[key]['u_name']}, але вага не змінилась, сальця не додалося."
                     # ===============================================
 
-                    messages.append(f"{msg}.\nПаця важило {old} кг, тепер {neww} кг (зміна сальця на {d:+d} кг)")
+                    messages.append(f"{msg}.\n{pet_name} важило {old} кг, тепер {neww} кг (зміна сальця на {d:+d} кг)")
                     old = neww
     
     if free_feeds_left > 0 and not arg_item:
@@ -543,7 +543,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
             time_left = format_timedelta_to_next_day()
-            messages.append(f"Паця втомилося, а у тебе немає ні енергетика, ні горілки в інвентарі. {pet_name} нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками.")
+            messages.append(f"Паця втомилося, а у тебе немає ні енергетика, ні горілки в інвентарі. \n{pet_name} нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками.")
     
     if arg_item:
         key = ALIASES.get(arg_item.lower())
