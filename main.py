@@ -40,15 +40,15 @@ def get_conn():
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
 def init_db():
-    sql_players = """
+    sql_players_create = """
     CREATE TABLE IF NOT EXISTS players (
       chat_id BIGINT NOT NULL,
       user_id BIGINT NOT NULL,
       username TEXT,
       pet_name TEXT,
       weight INTEGER NOT NULL DEFAULT 10,
-      last_feed_utc DATE,  -- Змінено на DATE для зберігання дати безкоштовної годівлі
-      last_zonewalk_utc DATE,  -- Змінено на DATE для зберігання дати безкоштовної ходки
+      last_feed_utc DATE,
+      last_zonewalk_utc DATE,
       created_at TIMESTAMPTZ DEFAULT now(),
       PRIMARY KEY (chat_id, user_id)
     );
@@ -65,8 +65,26 @@ def init_db():
     """
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(sql_players)
+    
+    # === Migration logic ===
+    # Check if old columns exist and rename/change type
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name IN ('last_feed', 'last_zonewalk')")
+    old_columns = [row[0] for row in cur.fetchall()]
+    
+    if 'last_feed' in old_columns:
+        print("Migrating 'last_feed' column...")
+        cur.execute("ALTER TABLE players RENAME COLUMN last_feed TO last_feed_utc")
+        cur.execute("ALTER TABLE players ALTER COLUMN last_feed_utc TYPE DATE USING last_feed_utc::date")
+        
+    if 'last_zonewalk' in old_columns:
+        print("Migrating 'last_zonewalk' column...")
+        cur.execute("ALTER TABLE players RENAME COLUMN last_zonewalk TO last_zonewalk_utc")
+        cur.execute("ALTER TABLE players ALTER COLUMN last_zonewalk_utc TYPE DATE USING last_zonewalk_utc::date")
+    
+    # Create tables if they don't exist
+    cur.execute(sql_players_create)
     cur.execute(sql_inv)
+    
     conn.commit()
     cur.close()
     conn.close()
@@ -118,15 +136,6 @@ def update_weight(chat_id, user_id, new_weight):
     cur.close()
     conn.close()
 
-def get_last_feed_date(chat_id, user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT last_feed_utc FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
-    r = cur.fetchone()
-    cur.close()
-    conn.close()
-    return r[0] if r else None
-
 def set_last_feed_date(chat_id, user_id, ts=None):
     ts = ts or now_utc().date()
     conn = get_conn()
@@ -135,15 +144,6 @@ def set_last_feed_date(chat_id, user_id, ts=None):
     conn.commit()
     cur.close()
     conn.close()
-
-def get_last_zonewalk_date(chat_id, user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT last_zonewalk_utc FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
-    r = cur.fetchone()
-    cur.close()
-    conn.close()
-    return r[0] if r else None
 
 def set_last_zonewalk_date(chat_id, user_id, ts=None):
     ts = ts or now_utc().date()
@@ -346,7 +346,7 @@ def handle_inventory(chat_id, user_id, username):
 def handle_feed(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
-    last_feed_date = row['last_feed_utc']
+    last_feed_date = row.get('last_feed_utc')
     current_utc_date = now_utc().date()
     messages = []
     
@@ -419,7 +419,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
 
 def handle_zonewalk(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
-    last_zonewalk_date = row['last_zonewalk_utc']
+    last_zonewalk_date = row.get('last_zonewalk_utc')
     current_utc_date = now_utc().date()
     messages = []
     
