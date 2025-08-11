@@ -48,7 +48,9 @@ def init_db():
       pet_name TEXT,
       weight INTEGER NOT NULL DEFAULT 10,
       last_feed_utc DATE,
+      daily_feeds_count INTEGER NOT NULL DEFAULT 0,
       last_zonewalk_utc DATE,
+      daily_zonewalks_count INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ DEFAULT now(),
       PRIMARY KEY (chat_id, user_id)
     );
@@ -67,7 +69,6 @@ def init_db():
     cur = conn.cursor()
     
     # === Migration logic ===
-    # Check if old columns exist and rename/change type
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name IN ('last_feed', 'last_zonewalk')")
     old_columns = [row[0] for row in cur.fetchall()]
     
@@ -81,6 +82,16 @@ def init_db():
         cur.execute("ALTER TABLE players RENAME COLUMN last_zonewalk TO last_zonewalk_utc")
         cur.execute("ALTER TABLE players ALTER COLUMN last_zonewalk_utc TYPE DATE USING last_zonewalk_utc::date")
     
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name='daily_zonewalks_count'")
+    if not cur.fetchone():
+        print("Adding 'daily_zonewalks_count' column...")
+        cur.execute("ALTER TABLE players ADD COLUMN daily_zonewalks_count INTEGER NOT NULL DEFAULT 0")
+
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name='daily_feeds_count'")
+    if not cur.fetchone():
+        print("Adding 'daily_feeds_count' column...")
+        cur.execute("ALTER TABLE players ADD COLUMN daily_feeds_count INTEGER NOT NULL DEFAULT 0")
+
     # Create tables if they don't exist
     cur.execute(sql_players_create)
     cur.execute(sql_inv)
@@ -136,20 +147,36 @@ def update_weight(chat_id, user_id, new_weight):
     cur.close()
     conn.close()
 
-def set_last_feed_date(chat_id, user_id, ts=None):
+def set_last_feed_date_and_count(chat_id, user_id, ts=None, count=0):
     ts = ts or now_utc().date()
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE players SET last_feed_utc=%s WHERE chat_id=%s AND user_id=%s", (ts, chat_id, user_id))
+    cur.execute("UPDATE players SET last_feed_utc=%s, daily_feeds_count=%s WHERE chat_id=%s AND user_id=%s", (ts, count, chat_id, user_id))
     conn.commit()
     cur.close()
     conn.close()
 
-def set_last_zonewalk_date(chat_id, user_id, ts=None):
+def increment_feed_count(chat_id, user_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE players SET daily_feeds_count = daily_feeds_count + 1 WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def set_last_zonewalk_date_and_count(chat_id, user_id, ts=None, count=0):
     ts = ts or now_utc().date()
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE players SET last_zonewalk_utc=%s WHERE chat_id=%s AND user_id=%s", (ts, chat_id, user_id))
+    cur.execute("UPDATE players SET last_zonewalk_utc=%s, daily_zonewalks_count=%s WHERE chat_id=%s AND user_id=%s", (ts, count, chat_id, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def increment_zonewalk_count(chat_id, user_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE players SET daily_zonewalks_count = daily_zonewalks_count + 1 WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
     conn.commit()
     cur.close()
     conn.close()
@@ -205,6 +232,9 @@ def top_players(chat_id, limit=10):
     return rows
 
 # === Game mechanics ===
+DAILY_FEEDS_LIMIT = 1  # ЗМІНІТЬ ЦЕ ЗНАЧЕННЯ ДЛЯ КЕРУВАННЯ КІЛЬКІСТЮ БЕЗКОШТОВНИХ КОРМЬОЖОК НА ДОБУ
+DAILY_ZONEWALKS_LIMIT = 2  # ЗМІНІТЬ ЦЕ ЗНАЧЕННЯ ДЛЯ КЕРУВАННЯ КІЛЬКІСТЮ БЕЗКОШТОВНИХ ХОДОК НА ДОБУ
+
 def bounded_weight(old, delta):
     new = old + delta
     return max(1, new)
@@ -278,14 +308,16 @@ def set_webhook():
 # === Command handlers (simple parsing) ===
 def handle_start(chat_id):
     txt = (
-        "П.А.Ц.Є.Т.К.О. 2 — бот про вирощування пацєток.\n\n"
-        "У кожного гравця є пацєтко: його можна кормити (/feed), чухати за вушком (/pet), "
-        "ходити в ходки (/zonewalk). Є інвентар (/inventory), можна назвати пацєтко (/name), "
-        "і подивитися топ по вазі (/top).\n\n"
+        "П.А.Ц.Є.Т.К.О. 2.\n\n"
+        "ПАЦЄТКО СІ ВРОДИЛО - РАДІЄ ВСЕ СЕЛО НОВАЧКІВ!"
+        "У кожного гравця є своє сталкер-пацєтко: його можна кормити (/feed), чухати за вушком (/pet), "
+        "ходити в ходки в зону за хабаром(/zonewalk). Є інвентар, де буде лежати весь хабар вашого пацєти, (/inventory), також можна дати клікуху вашому пацєтку (/name), "
+        "і подивитися топ по вазі і дізнатися хто найкраще сталкерське пацєтко (/top).\n\n"
         "Формат команд:\n"
-        "/feed [предмет] - безкоштовна кормьожка раз на добу (UTC). Додатково можна вказати предмет з інвентарю для додаткової корміжки.\n"
+        f"/feed [предмет] - безкоштовне харчування прямо від Бармена з Бару 100 Пятачків ({DAILY_FEEDS_LIMIT} разів на добу UTC). Додатково можна вказати предмет з інвентарю.\n"
+        f"/zonewalk [предмет] - організувати ходку в небезпечну Зону ({DAILY_ZONEWALKS_LIMIT} разів на добу UTC). Додатково можна тяпнути енергетика або горілки, щоб мати можливість і сили сходити більше разів.\n"
         "/name Ім'я - дати ім'я пацєтці\n"
-        "/top - топ 10 пацєток чату за вагою\n"
+        "/top - топ-10 Сталкерів Пацєток чату за вагою\n"
         "/pet - почухати за вушком\n"
         "/inventory - показати інвентарь\n"
     )
@@ -325,11 +357,11 @@ def handle_pet(chat_id, user_id, username):
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
         if delta > 0:
-            send_message(chat_id, f"Почухав — пацєтко трохи під'їлося: +{delta} кг → {neww} кг")
+            send_message(chat_id, f"Так файно вчухав пацю, що він від радості засвоїв додатково {delta} кг сальця і тепер важить {neww} кг")
         else:
-            send_message(chat_id, f"Почухав — пацєтко трохи розтеклося: {delta} кг → {neww} кг")
+            send_message(chat_id, f"В цей раз паця сі невподобало чух і напряглося. Через стрес пацєтко втратило  {delta} кг сальця і тепер важить {neww} кг")
     else:
-        send_message(chat_id, "Почухав за вушком — пацєтко заспокоїлося, але нічого не змінилося.")
+        send_message(chat_id, "Паця лише задоволено рохнуло і, поправивши протигазик, чавкнуло. Десь збоку дзижчала муха")
 
 def handle_inventory(chat_id, user_id, username):
     ensure_player(chat_id, user_id, username)
@@ -347,22 +379,39 @@ def handle_feed(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
     last_feed_date = row.get('last_feed_utc')
+    feed_count = row.get('daily_feeds_count')
     current_utc_date = now_utc().date()
     messages = []
     
+    if last_feed_date is None or last_feed_date < current_utc_date:
+        feed_count = 0
+        set_last_feed_date_and_count(chat_id, user_id, current_utc_date, count=0)
+    
     FEED_PRIORITY = ['baton', 'sausage', 'can', 'vodka']
+    free_feeds_left = DAILY_FEEDS_LIMIT - feed_count
     
-    free_feed_available = last_feed_date is None or last_feed_date < current_utc_date
-    
-    if free_feed_available:
+    # === Обробка безкоштовної годівлі ===
+    if free_feeds_left > 0:
         if not arg_item:
             delta = random.randint(-40, 40)
             neww = bounded_weight(old, delta)
             update_weight(chat_id, user_id, neww)
-            set_last_feed_date(chat_id, user_id, current_utc_date)
-            messages.append(f"Безкоштовна кормьожка: {old} кг → {neww} кг (Δ {delta:+d})")
+            increment_feed_count(chat_id, user_id)
+
+            # === Змінено: Умовні повідомлення для дельти ===
+            if delta > 0:
+                msg = f"Пацєтко наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз. Паця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
+            elif delta < 0:
+                msg = f"Пацєтко неохоче поїло, після чого ви чуєте жахливий буркіт живота. Цей старий пиздун в цей раз передав протухші продукти. Паця сильно просралося, втративши {delta:+d} кг сальця і тепер важить {neww} кг"
+            else:
+                msg = f"Пацєтко з претензією дивиться на тебе. Схоже, в цей раз старий хрін передав бутлі з водою та мінімум харчів, від яких толку - трохи більше, ніж дірка від бублика. Вага паці змінилась аж на ЦІЛИХ {delta:+d} кг сальця і важить {neww} кг."
+            # ===============================================
+
+            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена: {msg} ({feed_count + 1}/{DAILY_FEEDS_LIMIT})")
             old = neww
+            free_feeds_left -= 1
             
+    # === Обробка, якщо безкоштовних годівль не залишилось, але предмет не вказано ===
     elif not arg_item:
         inv = get_inventory(chat_id, user_id)
         item_to_use = None
@@ -384,15 +433,16 @@ def handle_feed(chat_id, user_id, username, arg_item):
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
             time_left = format_timedelta_to_next_day()
-            messages.append(f"У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку. Безкоштовна годівля буде доступна через **{time_left}**.")
+            messages.append(f"У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку. Наступна безкоштовна поставка харчів від Бармена через {time_left}.")
 
+    # === Обробка годівлі з вказаним предметом ===
     if arg_item:
         key = ALIASES.get(arg_item.lower())
         if not key:
             messages.append("Невідомий предмет. Доступні: батон, ковбаса, консерва, горілка, енергетик.")
         else:
             if key not in ITEMS or 'feed' not in (ITEMS[key]['uses_for'] or []):
-                messages.append(f"{ITEMS.get(key, {}).get('u_name', key)} не годиться для кормьожки.")
+                messages.append(f"{ITEMS.get(key, {}).get('u_name', key)} не годиться для харчування паці.")
             else:
                 ok = remove_item(chat_id, user_id, key, qty=1)
                 if not ok:
@@ -402,26 +452,44 @@ def handle_feed(chat_id, user_id, username, arg_item):
                     d = random.randint(a, b)
                     neww = bounded_weight(old, d)
                     update_weight(chat_id, user_id, neww)
-                    messages.append(f"Використано {ITEMS[key]['u_name']}: {old} кг → {neww} кг (Δ {d:+d})")
+
+                    # === Змінено: Умовні повідомлення для дельти ===
+                    if d > 0:
+                        msg = f"Дав схрумкати паці {ITEMS[key]['u_name']}, і маєш приріст сальця!"
+                    elif d < 0:
+                        msg = f"Пацєтко з'їло {ITEMS[key]['u_name']} і щось пішло не так. Паця просралося і вага зменшилася - мінус сальце."
+                    else:
+                        msg = f"Накормив пацєтко {ITEMS[key]['u_name']}, але вага не змінилась, сальця не додалося."
+                    # ===============================================
+
+                    messages.append(f"{msg}: Паця важило {old} кг, тепер {neww} кг (зміна сальця на {d:+d} кг)")
                     old = neww
     
-    if free_feed_available and not arg_item:
+    if free_feeds_left > 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
-        messages.append(f"Наступна безкоштовна годівля буде доступна через **{time_left}**.")
+        messages.append(f"У тебе залишилось {free_feeds_left} безкоштовних харчів від Бармена до кінця доби. Наступні будуть доступні через {time_left}.")
+    elif free_feeds_left <= 0 and not arg_item:
+        time_left = format_timedelta_to_next_day()
+        messages.append(f"У тебе закінчилися безкоштовні харчі від Бармена на сьогодні. Наступні будуть доступні через {time_left}.")
 
     inv = get_inventory(chat_id, user_id)
     avail_feed = {k:v for k,v in inv.items() if k in ITEMS and 'feed' in (ITEMS[k]['uses_for'] or [])}
     if avail_feed:
         lines = [f"{ITEMS[k]['u_name']}: {q}" for k,q in avail_feed.items()]
-        messages.append("У тебе є предмети для додаткової корміжки: " + ", ".join(lines))
+        messages.append("У тебе є предмети для додаткового харчування: " + ", ".join(lines))
     
     send_message(chat_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
 
 def handle_zonewalk(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     last_zonewalk_date = row.get('last_zonewalk_utc')
+    zonewalk_count = row.get('daily_zonewalks_count')
     current_utc_date = now_utc().date()
     messages = []
+    
+    if last_zonewalk_date is None or last_zonewalk_date < current_utc_date:
+        zonewalk_count = 0
+        set_last_zonewalk_date_and_count(chat_id, user_id, current_utc_date, count=0)
     
     ZONEWALK_PRIORITY = ['energy', 'vodka']
     
@@ -444,14 +512,15 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             s += "Приніс: " + ", ".join(ITEMS[it]['u_name'] for it in loot)
         return s
         
-    free_walk_available = last_zonewalk_date is None or last_zonewalk_date < current_utc_date
+    free_walks_left = DAILY_ZONEWALKS_LIMIT - zonewalk_count
     
-    if free_walk_available:
+    if free_walks_left > 0:
         if not arg_item:
-            set_last_zonewalk_date(chat_id, user_id, current_utc_date)
+            increment_zonewalk_count(chat_id, user_id)
             player = ensure_player(chat_id, user_id, username)
-            s = "Безкоштовна ходка: " + do_one_walk(player)
+            s = f"Безкоштовна ходка ({zonewalk_count + 1}/{DAILY_ZONEWALKS_LIMIT}): " + do_one_walk(player)
             messages.append(s)
+            free_walks_left -= 1
     
     elif not arg_item:
         inv = get_inventory(chat_id, user_id)
@@ -471,7 +540,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
             time_left = format_timedelta_to_next_day()
-            messages.append(f"У тебе немає предметів для ходки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками. Наступна безкоштовна ходка буде доступна через **{time_left}**.")
+            messages.append(f"Паця втомилося, а у тебе немає ні енергетика, ні горілки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками. Відчуває, що відновить сили для нової ходки через {time_left}.")
     
     if arg_item:
         key = ALIASES.get(arg_item.lower())
@@ -489,9 +558,12 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
                     s = f"Використано {ITEMS[key]['u_name']} для додаткової ходки: " + do_one_walk(player)
                     messages.append(s)
     
-    if free_walk_available and not arg_item:
+    if free_walks_left > 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
-        messages.append(f"Наступна безкоштовна ходка буде доступна через **{time_left}**.")
+        messages.append(f"Паця заряджене на перемогу і має сил на {free_walks_left} ходок до кінця доби. Сили на наступні будуть черех {time_left}.")
+    elif free_walks_left <= 0 and not arg_item:
+        time_left = format_timedelta_to_next_day()
+        messages.append(f"Паця втомилося, а у тебе немає ні енергетика, ні горілки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками. Відчуває, що відновить сили для нової ходки через {time_left}.")
 
     inv = get_inventory(chat_id, user_id)
     zone_items = {k:v for k,v in inv.items() if k in ITEMS and 'zonewalk' in (ITEMS[k]['uses_for'] or [])}
