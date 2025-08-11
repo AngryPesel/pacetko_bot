@@ -439,7 +439,7 @@ def handle_pet(chat_id, user_id, username):
         if time_since_last_pet < cooldown:
             time_left = cooldown - time_since_last_pet
             time_left_str = format_timedelta(time_left)
-            send_message(chat_id, f"*звук цвіркунів* {pet_name} ніяк не реагує на чух. \nРаптом {pet_name} ліниво дістає годинник і дає тобі зрозуміти, що паця хоче наступний чух через {time_left_str}.")
+            send_message(chat_id, f"*звук цвіркунів* {pet_name} ніяк не реагує на чух. \nРаптом {pet_name} ліниво дістає годинник і дає тобі зрозуміти, що воно хоче наступний чух через {time_left_str}.")
             return
 
     # No cooldown, or cooldown has passed
