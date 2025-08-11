@@ -383,7 +383,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
-            messages.append("У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним.")
+            messages.append("У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумним поглядом пішло спати в сховок.")
 
     if arg_item:
         key = ALIASES.get(arg_item.lower())
@@ -474,7 +474,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
-            messages.append("У тебе немає предметів для ходки в інвентарі. Пацєтко нікуди не пішло.")
+            messages.append("У тебе немає предметів для ходки в інвентарі. Втомлене пацєтко нікуди не пішло і залишилося біля ватри травити анекдоти з іншими пацєтками.")
     
     if arg_item:
         key = ALIASES.get(arg_item.lower())
