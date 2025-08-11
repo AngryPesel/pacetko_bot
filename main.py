@@ -543,7 +543,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
             time_left = format_timedelta_to_next_day()
-            messages.append(f"Паця втомилося, а у тебе немає ні енергетика, ні горілки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками.")
+            messages.append(f"Паця втомилося, а у тебе немає ні енергетика, ні горілки в інвентарі. {pet_name} нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками.")
     
     if arg_item:
         key = ALIASES.get(arg_item.lower())
@@ -563,10 +563,10 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
     
     if free_walks_left > 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
-        messages.append(f"А ще паця заряджене на перемогу і має сил на {free_walks_left} ходок до кінця доби. ")
+        messages.append(f"\nА ще паця заряджене на перемогу і має сил на {free_walks_left} ходок до кінця доби. ")
     elif free_walks_left <= 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
-        messages.append(f"\n Це були останні сили на сьогодні для походів в Зону у паці. Сили на наступні будуть черех {time_left}.")
+        messages.append(f"\nЦе були останні сили на сьогодні для походів в Зону у паці. Сили на наступні будуть через {time_left}.")
 
     inv = get_inventory(chat_id, user_id)
     zone_items = {k:v for k,v in inv.items() if k in ITEMS and 'zonewalk' in (ITEMS[k]['uses_for'] or [])}
