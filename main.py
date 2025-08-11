@@ -344,15 +344,24 @@ def handle_feed(chat_id, user_id, username, arg_item):
     
     # Пріоритет предметів для годівлі від найменшого до найбільшого впливу
     FEED_PRIORITY = ['baton', 'sausage', 'can', 'vodka']
-    
+
+    free_allowed = False
+    if last is None:
+        free_allowed = True
+    else:
+        # last is timezone-aware from DB; compute diff
+        diff = now - last
+        if diff >= timedelta(hours=24):
+            free_allowed = True
+
     # Перевіряємо, чи була безкоштовна годівля
-    free_fed = False
-    if last is None or (now - last) >= timedelta(hours=24):
+    if free_allowed = True:
         delta = random.randint(-40, 40)
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
         set_last_feed(chat_id, user_id, now)
-        messages.append(f"Безкоштовна кормьожка: {old} кг → {neww} кг (Δ {delta:+d})")
+        diff = now - last
+        messages.append(f"Безкоштовна кормьожка: {old} кг → {neww} кг (Δ {delta:+d}). Наступна безкоштовна поставка харчів від Бармена буде через {diff} годин")
         old = neww
         free_fed = True
         
@@ -377,7 +386,8 @@ def handle_feed(chat_id, user_id, username, arg_item):
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
-            messages.append("У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку.")
+            diff = now - last
+            messages.append(f"У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку. Наступна безкоштовна поставка харчів від Бармена буде через {diff} годин")
 
     # Обробка випадку, коли користувач вказав предмет (як у поточній реалізації)
     if arg_item:
