@@ -309,7 +309,7 @@ def handle_top(chat_id):
 def handle_pet(chat_id, user_id, username):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
-    if random.random() < 0.05:
+    if random.random() < 0.10:
         sign = random.choice([-1,1])
         delta = random.randint(1,3) * sign
         neww = bounded_weight(old, delta)
