@@ -131,7 +131,7 @@ LOOT_WEIGHTS = [35,30,13,7,15]
 
 # === NEW FEATURE: Колесо Фортуни (Rewards) ===
 WHEEL_REWARDS = {
-    "nothing": {"u_name": "Дуля з маком", "quantity": 0, "weight": 30},
+    "nothing": {"u_name": "Дуля з маком і консервна банка від Сидора", "quantity": 0, "weight": 30},
     "baton": {"u_name": "Батон", "quantity": 1, "weight": 30},
     "sausage": {"u_name": "Ковбаса", "quantity": 1, "weight": 20},
     "can": {"u_name": 'Консерва "Сніданок Пацєти"', "quantity": 1, "weight": 10},
@@ -629,7 +629,6 @@ def handle_wheel(chat_id, user_id, username):
     row = ensure_player(chat_id, user_id, username)
     last_wheel_date = row.get('last_wheel_utc')
     wheel_count = row.get('daily_wheel_count')
-    pet_name = row.get('pet_name', 'Пацєтко')
     current_utc_date = now_utc().date()
     
     if last_wheel_date is None or last_wheel_date < current_utc_date:
@@ -638,7 +637,7 @@ def handle_wheel(chat_id, user_id, username):
     
     if wheel_count >= DAILY_WHEEL_LIMIT:
         time_left = format_timedelta_to_next_day()
-        send_message(chat_id, f"Йоо, Казино Золотий Хряцик для вас наразі зачинено. \n{pet_name} культурно пояснюють, що деп неможливий і викидають з казино. \\. Наступний спін буде доступний через **{time_left}**\\.")
+        send_message(chat_id, f"Нажаль, на сьогодні для {pet_name} казино Золотий Хряцик закрите. Охоронці офають з позором {pet_name} і виганяють його з казіка. \\. Наступний деп буде доступний через **{time_left}**\\.")
         return
         
     reward = spin_wheel()
@@ -648,9 +647,9 @@ def handle_wheel(chat_id, user_id, username):
     
     if reward != "nothing":
         add_item(chat_id, user_id, reward, reward_qty)
-        send_message(chat_id, f"Колесо Фортуни обертається\\. \\.\\. і ви виграли: **{reward_name}** \\({reward_qty} шт\\)! 🎉")
+        send_message(chat_id, f"Колесо Фортуни обертається\\.\\.\\. і ви виграли: **{reward_name}** \\({reward_qty} шт\\)\\! 🎉")
     else:
-        send_message(chat_id, f"Колесо Фортуни обертається\\. \\.\\. і ви виграли: **{reward_name}**\\. На жаль, фортуна сьогодні не на вашому боці\\. 😬")
+        send_message(chat_id, f"Колесо Фортуни обертається\\.\\.\\. і ви виграли: **{reward_name}**\\. \nНа жаль, фортуна сьогодні не на вашому боці\\. 😬")
     
     increment_wheel_count(chat_id, user_id)
 # =======================================================
