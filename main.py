@@ -333,33 +333,53 @@ def handle_inventory(chat_id, user_id, username):
         lines.append(f"{u}: {q}")
     send_message(chat_id, "Інвентар:\n" + "\n".join(lines))
 
+# ... (весь попередній код)
+
 def handle_feed(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
     last = row['last_feed']
     now = now_utc()
-    free_allowed = False
-    if last is None:
-        free_allowed = True
-    else:
-        # last is timezone-aware from DB; compute diff
-        diff = now - last
-        if diff >= timedelta(hours=24):
-            free_allowed = True
     messages = []
-    if free_allowed:
-        delta = random.randint(-40,40)
+    
+    # Пріоритет предметів для годівлі від найменшого до найбільшого впливу
+    FEED_PRIORITY = ['baton', 'sausage', 'can', 'vodka']
+    
+    # Перевіряємо, чи була безкоштовна годівля
+    free_fed = False
+    if last is None or (now - last) >= timedelta(hours=24):
+        delta = random.randint(-40, 40)
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
         set_last_feed(chat_id, user_id, now)
         messages.append(f"Безкоштовна кормьожка: {old} кг → {neww} кг (Δ {delta:+d})")
         old = neww
-    inv = get_inventory(chat_id, user_id)
-    avail_feed = {k:v for k,v in inv.items() if k in ITEMS and 'feed' in (ITEMS[k]['uses_for'] or [])}
-    if avail_feed:
-        lines = [f"{ITEMS[k]['u_name']}: {q}" for k,q in avail_feed.items()]
-        messages.append("У тебе є предмети для додаткової корміжки: " + ", ".join(lines))
-    # if user asked to use item
+        free_fed = True
+        
+    # Якщо безкоштовна годівля вже була, але користувач знову вводить /feed
+    elif not arg_item:
+        inv = get_inventory(chat_id, user_id)
+        item_to_use = None
+        for item_key in FEED_PRIORITY:
+            if inv.get(item_key, 0) > 0 and 'feed' in ITEMS[item_key]['uses_for']:
+                item_to_use = item_key
+                break
+        
+        if item_to_use:
+            ok = remove_item(chat_id, user_id, item_to_use, qty=1)
+            if ok:
+                a, b = ITEMS[item_to_use]['feed_delta']
+                d = random.randint(a, b)
+                neww = bounded_weight(old, d)
+                update_weight(chat_id, user_id, neww)
+                messages.append(f"У пацєтка бурчить в животі, тому ти використав {ITEMS[item_to_use]['u_name']} з інвентарю: {old} кг → {neww} кг (Δ {d:+d})")
+                old = neww
+            else:
+                messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
+        else:
+            messages.append("У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку.")
+
+    # Обробка випадку, коли користувач вказав предмет (як у поточній реалізації)
     if arg_item:
         key = ALIASES.get(arg_item.lower())
         if not key:
@@ -372,52 +392,81 @@ def handle_feed(chat_id, user_id, username, arg_item):
                 if not ok:
                     messages.append(f"У тебе немає {ITEMS[key]['u_name']} в інвентарі.")
                 else:
-                    a,b = ITEMS[key]['feed_delta']
-                    d = random.randint(a,b)
+                    a, b = ITEMS[key]['feed_delta']
+                    d = random.randint(a, b)
                     neww = bounded_weight(old, d)
                     update_weight(chat_id, user_id, neww)
                     messages.append(f"Використано {ITEMS[key]['u_name']}: {old} кг → {neww} кг (Δ {d:+d})")
                     old = neww
+    
+    # Виводимо наявні предмети для годівлі, якщо вони є (додатково до основної логіки)
+    inv = get_inventory(chat_id, user_id)
+    avail_feed = {k:v for k,v in inv.items() if k in ITEMS and 'feed' in (ITEMS[k]['uses_for'] or [])}
+    if avail_feed:
+        lines = [f"{ITEMS[k]['u_name']}: {q}" for k,q in avail_feed.items()]
+        messages.append("У тебе є предмети для додаткової корміжки: " + ", ".join(lines))
+    
     send_message(chat_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
 
 def handle_zonewalk(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     last = row['last_zonewalk']
     now = now_utc()
-    free_allowed = False
-    if last is None:
-        free_allowed = True
-    else:
-        diff = now - last
-        if diff >= timedelta(hours=24):
-            free_allowed = True
     messages = []
-    inv = get_inventory(chat_id, user_id)
-    zone_items = {k:v for k,v in inv.items() if k in ITEMS and 'zonewalk' in (ITEMS[k]['uses_for'] or [])}
-    if zone_items:
-        messages.append("У тебе є предмети для додаткових ходок: " + ", ".join(f"{ITEMS[k]['u_name']}: {q}" for k,q in zone_items.items()))
-    def do_one_walk():
+    
+    # Пріоритет предметів для ходки
+    ZONEWALK_PRIORITY = ['energy', 'vodka']
+    
+    # Функція для виконання одного походу
+    def do_one_walk(player):
         cnt = pick_item_count()
         loot = []
-        if cnt>0:
+        if cnt > 0:
             loot = pick_loot(cnt)
             for it in loot:
                 add_item(chat_id, user_id, it, 1)
         delta = zonewalk_weight_delta()
-        player = ensure_player(chat_id, user_id, username)
         oldw = player['weight']
         neww = bounded_weight(oldw, delta)
         update_weight(chat_id, user_id, neww)
-        return cnt, loot, delta, oldw, neww
-    if free_allowed:
-        cnt, loot, delta, oldw, neww = do_one_walk()
-        set_last_zonewalk(chat_id, user_id, now)
-        s = f"Безкоштовна ходка: вага {oldw} → {neww} (Δ {delta:+d}). "
-        if cnt==0:
+        
+        s = f"вага {oldw} → {neww} (Δ {delta:+d}). "
+        if cnt == 0:
             s += "Нічого не приніс."
         else:
             s += "Приніс: " + ", ".join(ITEMS[it]['u_name'] for it in loot)
+        return s
+        
+    # Перевіряємо, чи доступна безкоштовна ходка
+    free_walked = False
+    if last is None or (now - last) >= timedelta(hours=24):
+        set_last_zonewalk(chat_id, user_id, now)
+        player = ensure_player(chat_id, user_id, username)
+        s = "Безкоштовна ходка: " + do_one_walk(player)
         messages.append(s)
+        free_walked = True
+    
+    # Якщо безкоштовна ходка вже була, але користувач знову вводить /zonewalk
+    elif not arg_item:
+        inv = get_inventory(chat_id, user_id)
+        item_to_use = None
+        for item_key in ZONEWALK_PRIORITY:
+            if inv.get(item_key, 0) > 0 and 'zonewalk' in ITEMS[item_key]['uses_for']:
+                item_to_use = item_key
+                break
+        
+        if item_to_use:
+            ok = remove_item(chat_id, user_id, item_to_use, qty=1)
+            if ok:
+                player = ensure_player(chat_id, user_id, username)
+                s = f"Пацєтко втомилося, тому ти використав {ITEMS[item_to_use]['u_name']} з інвентарю для додаткової ходки: " + do_one_walk(player)
+                messages.append(s)
+            else:
+                messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
+        else:
+            messages.append("У тебе немає предметів для ходки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками.")
+    
+    # Обробка випадку, коли користувач вказав предмет (як у поточній реалізації)
     if arg_item:
         key = ALIASES.get(arg_item.lower())
         if not key:
@@ -430,10 +479,17 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
                 if not ok:
                     messages.append(f"У тебе немає {ITEMS[key]['u_name']} в інвентарі.")
                 else:
-                    cnt, loot, delta, oldw, neww = do_one_walk()
-                    messages.append(f"Використано {ITEMS[key]['u_name']} для додаткової ходки: вага {oldw} → {neww} (Δ {delta:+d}).")
-                    if cnt>0:
-                        messages.append("Приніс: " + ", ".join(ITEMS[it]['u_name'] for it in loot))
+                    player = ensure_player(chat_id, user_id, username)
+                    s = f"Використано {ITEMS[key]['u_name']} для додаткової ходки: " + do_one_walk(player)
+                    messages.append(s)
+    
+    # Виводимо наявні предмети для ходки, якщо вони є (додатково до основної логіки)
+    inv = get_inventory(chat_id, user_id)
+    zone_items = {k:v for k,v in inv.items() if k in ITEMS and 'zonewalk' in (ITEMS[k]['uses_for'] or [])}
+    if zone_items:
+        lines = [f"{ITEMS[k]['u_name']}: {q}" for k,q in zone_items.items()]
+        messages.append("У тебе є предмети для додаткових ходок: " + ", ".join(lines))
+    
     send_message(chat_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
 
 # === Webhook endpoint ===
