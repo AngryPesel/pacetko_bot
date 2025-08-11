@@ -351,6 +351,7 @@ def handle_top(chat_id):
 def handle_pet(chat_id, user_id, username):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
+    pet_name = row.get('pet_name', 'Пацєтко') # Отримуємо ім'я
     if random.random() < 0.10:
         sign = random.choice([-1,1])
         delta = random.randint(1,3) * sign
@@ -361,7 +362,7 @@ def handle_pet(chat_id, user_id, username):
         else:
             send_message(chat_id, f"В цей раз паця сі невподобало чух і напряглося. Через стрес ***{pet_name}*** втратило  {delta} кг сальця і тепер важить {neww} кг")
     else:
-        send_message(chat_id, "Паця лише задоволено рохнуло і, поправивши протигазик, чавкнуло. Десь збоку дзижчала муха")
+        send_message(chat_id, f"***{pet_name}*** лише задоволено рохнуло і, поправивши протигазик, чавкнуло. Десь збоку дзижчала муха")
 
 def handle_inventory(chat_id, user_id, username):
     ensure_player(chat_id, user_id, username)
@@ -381,6 +382,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
     last_feed_date = row.get('last_feed_utc')
     feed_count = row.get('daily_feeds_count')
     current_utc_date = now_utc().date()
+    pet_name = row.get('pet_name', 'Пацєтко') # Отримуємо ім'я
     messages = []
     
     if last_feed_date is None or last_feed_date < current_utc_date:
@@ -400,11 +402,11 @@ def handle_feed(chat_id, user_id, username, arg_item):
 
             # === Змінено: Умовні повідомлення для дельти ===
             if delta > 0:
-                msg = f"Пацєтко наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз.\n Паця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
+                msg = f"***{pet_name}*** наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз.\n Паця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
             elif delta < 0:
-                msg = f"Пацєтко неохоче поїло, після чого ви чуєте жахливий буркіт живота. Цей старий пиздун в цей раз передав протухші продукти.\n Паця сильно просралося, втративши {delta:+d} кг сальця і тепер важить {neww} кг"
+                msg = f"***{pet_name}*** неохоче поїло, після чого ви чуєте жахливий буркіт живота. Цей старий пиздун в цей раз передав протухші продукти.\n ***{pet_name}*** сильно просралося, втративши {delta:+d} кг сальця і тепер важить {neww} кг"
             else:
-                msg = f"Пацєтко з претензією дивиться на тебе. Схоже, в цей раз старий хрін передав бутлі з водою та мінімум харчів, від яких толку - трохи більше, ніж дірка від бублика.\n Вага паці змінилась аж на ЦІЛИХ {delta:+d} кг сальця і важить {neww} кг."
+                msg = f"***{pet_name}*** з претензією дивиться на тебе. Схоже, в цей раз старий хрін передав бутлі з водою та мінімум харчів, від яких толку - трохи більше, ніж дірка від бублика.\n Вага ***{pet_name}*** змінилась аж на ЦІЛИХ {delta:+d} кг сальця і важить {neww} кг."
             # ===============================================
 
             messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена: {msg}")
