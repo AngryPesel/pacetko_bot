@@ -402,14 +402,14 @@ def handle_feed(chat_id, user_id, username, arg_item):
 
             # === Змінено: Умовні повідомлення для дельти ===
             if delta > 0:
-                msg = f"{pet_name} наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз.\n Паця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
+                msg = f"{pet_name} наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз.\nПаця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
             elif delta < 0:
-                msg = f"{pet_name} неохоче поїло, після чого ви чуєте жахливий буркіт живота. Цей старий пиздун в цей раз передав протухші продукти.\n {pet_name} сильно просралося, втративши {delta:+d} кг сальця і тепер важить {neww} кг"
+                msg = f"{pet_name} неохоче поїло, після чого ви чуєте жахливий буркіт живота. Цей старий пиздун в цей раз передав протухші продукти.\n{pet_name} сильно просралося, втративши {delta:+d} кг сальця і тепер важить {neww} кг"
             else:
-                msg = f"{pet_name} з претензією дивиться на тебе. Схоже, в цей раз старий хрін передав бутлі з водою та мінімум харчів, від яких толку - трохи більше, ніж дірка від бублика.\n Вага {pet_name} змінилась аж на ЦІЛИХ {delta:+d} кг сальця і важить {neww} кг."
+                msg = f"{pet_name} з претензією дивиться на тебе. Схоже, в цей раз старий хрін передав бутлі з водою та мінімум харчів, від яких толку - трохи більше, ніж дірка від бублика.\nВага {pet_name} змінилась аж на ЦІЛИХ {delta:+d} кг сальця і важить {neww} кг."
             # ===============================================
 
-            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена:\n {msg}")
+            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена:\n{msg}")
             old = neww
             free_feeds_left -= 1
             
@@ -464,21 +464,21 @@ def handle_feed(chat_id, user_id, username, arg_item):
                         msg = f"Накормив пацєтко {ITEMS[key]['u_name']}, але вага не змінилась, сальця не додалося."
                     # ===============================================
 
-                    messages.append(f"{msg}: Паця важило {old} кг, тепер {neww} кг (зміна сальця на {d:+d} кг)")
+                    messages.append(f"{msg}.\nПаця важило {old} кг, тепер {neww} кг (зміна сальця на {d:+d} кг)")
                     old = neww
     
     if free_feeds_left > 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
-        messages.append(f"\n У тебе залишилось {free_feeds_left} безкоштовних харчів від Бармена до кінця доби. Наступні будуть доступні через {time_left}.")
+        messages.append(f"\nУ тебе залишилось {free_feeds_left} безкоштовних харчів від Бармена до кінця доби. Наступні будуть доступні через {time_left}.")
     elif free_feeds_left <= 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
-        messages.append(f"\n Наступна безкоштовна поставка харчів від Бармена через {time_left}.")
+        messages.append(f"\nНаступна безкоштовна поставка харчів від Бармена через {time_left}.")
 
     inv = get_inventory(chat_id, user_id)
     avail_feed = {k:v for k,v in inv.items() if k in ITEMS and 'feed' in (ITEMS[k]['uses_for'] or [])}
     if avail_feed:
         lines = [f"{ITEMS[k]['u_name']}: {q}" for k,q in avail_feed.items()]
-        messages.append("\n У тебе є предмети для додаткового харчування: " + ", ".join(lines))
+        messages.append("\nУ тебе є предмети для додаткового харчування: " + ", ".join(lines))
     
     send_message(chat_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
 
@@ -508,11 +508,11 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
         neww = bounded_weight(oldw, delta)
         update_weight(chat_id, user_id, neww)
         
-        s = f"\n В процесі ходки {pet_name} набрав {delta:+d} кг сальця, і тепер важить {neww} кг."
+        s = f"\nВ процесі ходки {pet_name} набрав {delta:+d} кг сальця, і тепер важить {neww} кг."
         if cnt == 0:
-            s += "Цей раз без хабаря."
+            s += "\nЦей раз без хабаря."
         else:
-            s += f"\n Є хабар! {pet_name} приніс: " + ", ".join(ITEMS[it]['u_name'] for it in loot)
+            s += f"\nЄ хабар! {pet_name} приніс: " + ", ".join(ITEMS[it]['u_name'] for it in loot)
         return s
         
     free_walks_left = DAILY_ZONEWALKS_LIMIT - zonewalk_count
