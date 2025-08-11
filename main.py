@@ -18,6 +18,22 @@ if not WEBHOOK_BASE_URL:
     print('WARNING: WEBHOOK_BASE_URL not set. Bot will still run but webhook will not be set automatically.')
 
 app = Flask(__name__)
+BOT_USERNAME = None  # збережемо username бота
+
+def get_bot_username():
+    """Отримує username бота з Telegram API."""
+    global BOT_USERNAME
+    try:
+        r = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getMe", timeout=10)
+        data = r.json()
+        if data.get("ok"):
+            BOT_USERNAME = data["result"]["username"].lower()
+            print("Bot username:", BOT_USERNAME)
+        else:
+            print("Failed to get bot username:", data)
+    except Exception as e:
+        print("Error getting bot username:", e)
+
 
 # === DB helpers ===
 def get_conn():
@@ -440,8 +456,18 @@ def telegram_webhook():
         # ignore non-command messages
         return jsonify({'ok': True})
     parts = text.split(maxsplit=1)
-    cmd = parts[0].lower()
-    arg = parts[1] if len(parts)>1 else ''
+    cmd_full = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ''
+
+    # Якщо команда містить @username — перевіряємо, чи вона для нашого бота
+    if '@' in cmd_full:
+        cmd_name, cmd_user = cmd_full.split('@', 1)
+        if BOT_USERNAME and cmd_user != BOT_USERNAME:
+            return jsonify({'ok': True})  # команда іншому боту
+        cmd = cmd_name
+    else:
+        cmd = cmd_full
+
     try:
         if cmd == '/start':
             handle_start(chat_id)
@@ -465,6 +491,7 @@ def telegram_webhook():
     return jsonify({'ok': True})
 
 if __name__ == '__main__':
+    get_bot_username()  # Отримуємо username бота при старті
     # init DB and set webhook
     if DATABASE_URL:
         init_db()
