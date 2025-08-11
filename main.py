@@ -5,6 +5,7 @@ from psycopg2.extras import RealDictCursor
 import requests
 from datetime import datetime, timezone, timedelta
 import random
+import math # Додано для використання math.floor
 
 # === Configuration from environment ===
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -231,6 +232,27 @@ def zonewalk_weight_delta():
         return -random.randint(1,5)
     else:
         return random.randint(1,5)
+        
+# === Time formatting helper ===
+def format_timedelta(td: timedelta):
+    """Formats a timedelta object into a human-readable string (e.g., '1h 30m')."""
+    if td.total_seconds() <= 0:
+        return "уже"
+    
+    hours, remainder = divmod(td.total_seconds(), 3600)
+    minutes, _ = divmod(remainder, 60)
+    
+    parts = []
+    if hours > 0:
+        parts.append(f"{math.floor(hours)} год")
+    if minutes > 0:
+        parts.append(f"{math.floor(minutes)} хв")
+    
+    if not parts:
+        return "менше хвилини"
+    
+    return " ".join(parts)
+
 
 # === Telegram helpers ===
 def send_message(chat_id, text):
@@ -256,28 +278,16 @@ def set_webhook():
 # === Command handlers (simple parsing) ===
 def handle_start(chat_id):
     txt = (
-
         "П.А.Ц.Є.Т.К.О. 2 — бот про вирощування пацєток.\n\n"
-
         "У кожного гравця є пацєтко: його можна кормити (/feed), чухати за вушком (/pet), "
-
         "ходити в ходки (/zonewalk). Є інвентар (/inventory), можна назвати пацєтко (/name), "
-
         "і подивитися топ по вазі (/top).\n\n"
-
         "Формат команд:\n"
-
         "/feed [предмет] - безкоштовна кормьожка раз на 24 години (UTC). Додатково можна вказати предмет з інвентарю для додаткової корміжки.\n"
-
         "/name Ім'я - дати ім'я пацєтці\n"
-
         "/top - топ 10 пацєток чату за вагою\n"
-
         "/pet - почухати за вушком\n"
-
         "/inventory - показати інвентарь\n"
-
-
     )
     send_message(chat_id, txt)
 
@@ -333,8 +343,6 @@ def handle_inventory(chat_id, user_id, username):
         lines.append(f"{u}: {q}")
     send_message(chat_id, "Інвентар:\n" + "\n".join(lines))
 
-# ... (весь попередній код)
-
 def handle_feed(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
@@ -344,28 +352,19 @@ def handle_feed(chat_id, user_id, username, arg_item):
     
     # Пріоритет предметів для годівлі від найменшого до найбільшого впливу
     FEED_PRIORITY = ['baton', 'sausage', 'can', 'vodka']
-
-    free_allowed = False
-    if last is None:
-        free_allowed = True
-    else:
-        # last is timezone-aware from DB; compute diff
-        diff = now - last
-        if diff >= timedelta(hours=24):
-            free_allowed = True
-
+    
     # Перевіряємо, чи була безкоштовна годівля
-    if free_allowed = True:
-        delta = random.randint(-40, 40)
-        neww = bounded_weight(old, delta)
-        update_weight(chat_id, user_id, neww)
-        set_last_feed(chat_id, user_id, now)
-        diff = now - last
-        messages.append(f"Безкоштовна кормьожка: {old} кг → {neww} кг (Δ {delta:+d}). Наступна безкоштовна поставка харчів від Бармена буде через {diff} годин")
-        old = neww
-        free_fed = True
+    free_feed_available = last is None or (now - last) >= timedelta(hours=24)
+    
+    if free_feed_available:
+        if not arg_item:
+            delta = random.randint(-40, 40)
+            neww = bounded_weight(old, delta)
+            update_weight(chat_id, user_id, neww)
+            set_last_feed(chat_id, user_id, now)
+            messages.append(f"Безкоштовна кормьожка: {old} кг → {neww} кг (Δ {delta:+d})")
+            old = neww
         
-    # Якщо безкоштовна годівля вже була, але користувач знову вводить /feed
     elif not arg_item:
         inv = get_inventory(chat_id, user_id)
         item_to_use = None
@@ -386,10 +385,9 @@ def handle_feed(chat_id, user_id, username, arg_item):
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
-            diff = now - last
-            messages.append(f"У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку. Наступна безкоштовна поставка харчів від Бармена буде через {diff} годин")
+            time_left = timedelta(hours=24) - (now - last)
+            messages.append(f"У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку. Безкоштовна годівля буде доступна через **{format_timedelta(time_left)}**.")
 
-    # Обробка випадку, коли користувач вказав предмет (як у поточній реалізації)
     if arg_item:
         key = ALIASES.get(arg_item.lower())
         if not key:
@@ -409,6 +407,10 @@ def handle_feed(chat_id, user_id, username, arg_item):
                     messages.append(f"Використано {ITEMS[key]['u_name']}: {old} кг → {neww} кг (Δ {d:+d})")
                     old = neww
     
+    # Якщо безкоштовна годівля була, але користувач вказав предмет, додаємо таймер до повідомлення про безкоштовну годівлю
+    if free_feed_available and not arg_item:
+        messages[0] += f"\nНаступна безкоштовна годівля буде доступна через **24 год**."
+
     # Виводимо наявні предмети для годівлі, якщо вони є (додатково до основної логіки)
     inv = get_inventory(chat_id, user_id)
     avail_feed = {k:v for k,v in inv.items() if k in ITEMS and 'feed' in (ITEMS[k]['uses_for'] or [])}
@@ -448,15 +450,15 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
         return s
         
     # Перевіряємо, чи доступна безкоштовна ходка
-    free_walked = False
-    if last is None or (now - last) >= timedelta(hours=24):
-        set_last_zonewalk(chat_id, user_id, now)
-        player = ensure_player(chat_id, user_id, username)
-        s = "Безкоштовна ходка: " + do_one_walk(player)
-        messages.append(s)
-        free_walked = True
+    free_walk_available = last is None or (now - last) >= timedelta(hours=24)
     
-    # Якщо безкоштовна ходка вже була, але користувач знову вводить /zonewalk
+    if free_walk_available:
+        if not arg_item:
+            set_last_zonewalk(chat_id, user_id, now)
+            player = ensure_player(chat_id, user_id, username)
+            s = "Безкоштовна ходка: " + do_one_walk(player)
+            messages.append(s)
+    
     elif not arg_item:
         inv = get_inventory(chat_id, user_id)
         item_to_use = None
@@ -474,7 +476,8 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
-            messages.append("У тебе немає предметів для ходки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками.")
+            time_left = timedelta(hours=24) - (now - last)
+            messages.append(f"У тебе немає предметів для ходки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками. Наступна безкоштовна ходка буде доступна через **{format_timedelta(time_left)}**.")
     
     # Обробка випадку, коли користувач вказав предмет (як у поточній реалізації)
     if arg_item:
