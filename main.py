@@ -357,9 +357,9 @@ def handle_pet(chat_id, user_id, username):
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
         if delta > 0:
-            send_message(chat_id, f"Так файно вчухав пацю, що він від радості засвоїв додатково {delta} кг сальця і тепер важить {neww} кг")
+            send_message(chat_id, f"Так файно вчухав пацю, що ***{pet_name}*** від радості засвоїв додатково {delta} кг сальця і тепер важить {neww} кг")
         else:
-            send_message(chat_id, f"В цей раз паця сі невподобало чух і напряглося. Через стрес пацєтко втратило  {delta} кг сальця і тепер важить {neww} кг")
+            send_message(chat_id, f"В цей раз паця сі невподобало чух і напряглося. Через стрес ***{pet_name}*** втратило  {delta} кг сальця і тепер важить {neww} кг")
     else:
         send_message(chat_id, "Паця лише задоволено рохнуло і, поправивши протигазик, чавкнуло. Десь збоку дзижчала муха")
 
