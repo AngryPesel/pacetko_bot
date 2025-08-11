@@ -647,12 +647,13 @@ def handle_wheel(chat_id, user_id, username):
     reward_info = WHEEL_REWARDS[reward]
     reward_name = reward_info['u_name']
     reward_qty = reward_info['quantity']
+    new_spins_left = DAILY_WHEEL_LIMIT - (wheel_count + 1)
     
     if reward != "nothing":
         add_item(chat_id, user_id, reward, reward_qty)
-        send_message(chat_id, f"Казіч крутиться, Сидор мутиться... і ви виграли: {reward_name} ({reward_qty} шт)! 🎉\n\nУ {pet_name} залишилося {wheel_count} депів на сьогодні.")
+        send_message(chat_id, f"Казіч крутиться, Сидор мутиться... і ви виграли: {reward_name} ({reward_qty} шт)! 🎉\n\nУ {pet_name} залишилося {new_spins_left} депів на сьогодні.")
     else:
-        send_message(chat_id, f"Казіч крутиться, Сидор мутиться... і ви виграли: {reward_name}. \nНа жаль, фортуна сьогодні не на вашому боці. 😬\n\nУ {pet_name} залишилося {wheel_count} депів на сьогодні.")
+        send_message(chat_id, f"Казіч крутиться, Сидор мутиться... і ви виграли: {reward_name}. \nНа жаль, фортуна сьогодні не на вашому боці. 😬\n\nУ {pet_name} залишилося {new_spins_left} депів на сьогодні.")
     
     increment_wheel_count(chat_id, user_id)
 # =======================================================
