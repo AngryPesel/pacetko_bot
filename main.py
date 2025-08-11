@@ -53,6 +53,7 @@ def init_db():
       daily_zonewalks_count INTEGER NOT NULL DEFAULT 0,
       last_wheel_utc DATE,
       daily_wheel_count INTEGER NOT NULL DEFAULT 0,
+      last_pet_utc TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT now(),
       PRIMARY KEY (chat_id, user_id)
     );
@@ -102,6 +103,13 @@ def init_db():
         cur.execute("ALTER TABLE players ADD COLUMN daily_wheel_count INTEGER NOT NULL DEFAULT 0")
     # =================================================
 
+    # === NEW FEATURE: Pet Cooldown (DB Migration) ===
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name='last_pet_utc'")
+    if not cur.fetchone():
+        print("Adding 'last_pet_utc' column...")
+        cur.execute("ALTER TABLE players ADD COLUMN last_pet_utc TIMESTAMPTZ")
+    # =================================================
+
     # Create tables if they don't exist
     cur.execute(sql_players_create)
     cur.execute(sql_inv)
@@ -131,8 +139,8 @@ LOOT_WEIGHTS = [35,30,13,7,15]
 
 # === NEW FEATURE: Колесо Фортуни (Rewards) ===
 WHEEL_REWARDS = {
-    "nothing": {"u_name": "Дуля з маком і консервна банка від Сидора", "quantity": 0, "weight": 30},
-    "baton": {"u_name": "Батон", "quantity": 1, "weight": 30},
+    "nothing": {"u_name": "Дуля з маком і консервна банка від Сидора", "quantity": 0, "weight": 40},
+    "baton": {"u_name": "Батон", "quantity": 1, "weight": 20},
     "sausage": {"u_name": "Ковбаса", "quantity": 1, "weight": 20},
     "can": {"u_name": 'Консерва "Сніданок Пацєти"', "quantity": 1, "weight": 10},
     "vodka": {"u_name": 'Горілка "Пацятки"', "quantity": 1, "weight": 10},
@@ -220,6 +228,17 @@ def increment_wheel_count(chat_id, user_id):
     conn.close()
 # =================================================
 
+# === NEW FEATURE: Pet Cooldown (DB Helper) ===
+def update_last_pet_time(chat_id, user_id, ts=None):
+    ts = ts or now_utc()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE players SET last_pet_utc=%s WHERE chat_id=%s AND user_id=%s", (ts, chat_id, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+# ===============================================
+
 def get_inventory(chat_id, user_id):
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -278,6 +297,10 @@ DAILY_ZONEWALKS_LIMIT = 2
 DAILY_WHEEL_LIMIT = 3
 # ===========================================
 
+# === NEW FEATURE: Pet Cooldown (Limit) ===
+PET_COOLDOWN_HOURS = 2
+# ===========================================
+
 def bounded_weight(old, delta):
     new = old + delta
     return max(1, new)
@@ -313,14 +336,8 @@ def spin_wheel():
 # ===============================================
         
 # === Time formatting helper ===
-def format_timedelta_to_next_day():
-    """Formats time until the next UTC day as 'Xh Ym'."""
-    now = now_utc()
-    tomorrow_utc = (now + timedelta(days=1)).date()
-    start_of_tomorrow = datetime.combine(tomorrow_utc, datetime.min.time(), tzinfo=timezone.utc)
-    time_left = start_of_tomorrow - now
-    
-    hours, remainder = divmod(time_left.total_seconds(), 3600)
+def format_timedelta(td):
+    hours, remainder = divmod(td.total_seconds(), 3600)
     minutes, _ = divmod(remainder, 60)
     
     parts = []
@@ -333,6 +350,15 @@ def format_timedelta_to_next_day():
         return "менше хвилини"
     
     return " ".join(parts)
+
+def format_timedelta_to_next_day():
+    """Formats time until the next UTC day as 'Xh Ym'."""
+    now = now_utc()
+    tomorrow_utc = (now + timedelta(days=1)).date()
+    start_of_tomorrow = datetime.combine(tomorrow_utc, datetime.min.time(), tzinfo=timezone.utc)
+    time_left = start_of_tomorrow - now
+    
+    return format_timedelta(time_left)
 
 
 # === Telegram helpers ===
@@ -368,9 +394,9 @@ def handle_start(chat_id):
         f"/feed [предмет] - безкоштовне харчування прямо від Бармена з Бару 100 Пятачків ({DAILY_FEEDS_LIMIT} разів на добу UTC). Додатково можна вказати предмет з інвентарю.\n"
         f"/zonewalk [предмет] - організувати ходку в небезпечну Зону ({DAILY_ZONEWALKS_LIMIT} разів на добу UTC). Додатково можна тяпнути енергетика або горілки, щоб мати можливість і сили сходити більше разів.\n"
         f"/wheel - крутнути умовне Колесо Фортуни, щоб виграти хабар ({DAILY_WHEEL_LIMIT} раз на добу UTC).\n"
+        f"/pet - почухати пацю за вушком (кожні {PET_COOLDOWN_HOURS} год).\n"
         "/name Ім'я - дати ім'я пацєтці\n"
         "/top - топ-10 Сталкерів Пацєток чату за вагою\n"
-        "/pet - почухати за вушком\n"
         "/inventory - показати інвентарь\n"
     )
     send_message(chat_id, txt)
@@ -403,8 +429,23 @@ def handle_top(chat_id):
 def handle_pet(chat_id, user_id, username):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
-    pet_name = row.get('pet_name', 'Пацєтко') # Отримуємо ім'я
-    if random.random() < 0.20:
+    pet_name = row.get('pet_name', 'Пацєтко')
+    last_pet_time = row.get('last_pet_utc')
+    current_time = now_utc()
+    
+    if last_pet_time:
+        time_since_last_pet = current_time - last_pet_time
+        cooldown = timedelta(hours=PET_COOLDOWN_HOURS)
+        if time_since_last_pet < cooldown:
+            time_left = cooldown - time_since_last_pet
+            time_left_str = format_timedelta(time_left)
+            send_message(chat_id, f"*звук цвіркунів* {pet_name} ніяк не реагує на чух. \nРаптом {pet_name} ліниво дістає годинник і дає тобі зрозуміти, що паця хоче наступний чух через {time_left_str}.")
+            return
+
+    # No cooldown, or cooldown has passed
+    update_last_pet_time(chat_id, user_id, current_time)
+    
+    if random.random() < 0.30:
         sign = random.choice([-1,1])
         delta = random.randint(1,3) * sign
         neww = bounded_weight(old, delta)
@@ -415,6 +456,7 @@ def handle_pet(chat_id, user_id, username):
             send_message(chat_id, f"В цей раз паця сі невподобало чух і напряглося. Через стрес {pet_name} втратило {abs(delta)} кг сальця і тепер важить {neww} кг")
     else:
         send_message(chat_id, f"{pet_name} лише задоволено рохнуло і, поправивши протигазик, чавкнуло. Десь збоку дзижчала муха")
+
 
 def handle_inventory(chat_id, user_id, username):
     ensure_player(chat_id, user_id, username)
@@ -638,9 +680,11 @@ def handle_wheel(chat_id, user_id, username):
     
     pet_name = row.get('pet_name', 'Пацєтко')
 
-    if wheel_count >= DAILY_WHEEL_LIMIT:
+    spins_left = DAILY_WHEEL_LIMIT - wheel_count
+
+    if spins_left <= 0:
         time_left = format_timedelta_to_next_day()
-        send_message(chat_id, f"Нажаль, на сьогодні для {pet_name} казино Золотий Хряцик закрите. Охоронці офають з позором {pet_name} і виганяють його з казіка.. Наступний деп буде доступний через {time_left}.")
+        send_message(chat_id, f"Нажаль, на сьогодні для {pet_name} казино Золотий Хряцик закрите. Охоронці офають з позором {pet_name} і виганяють його з казіка. Наступний деп буде доступний через {time_left}.")
         return
         
     reward = spin_wheel()
