@@ -1,4 +1,3 @@
-# ... (весь попередній код)
 import os
 from flask import Flask, request, jsonify
 import psycopg2
@@ -334,6 +333,8 @@ def handle_inventory(chat_id, user_id, username):
         lines.append(f"{u}: {q}")
     send_message(chat_id, "Інвентар:\n" + "\n".join(lines))
 
+# ... (весь попередній код)
+
 def handle_feed(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
@@ -341,29 +342,22 @@ def handle_feed(chat_id, user_id, username, arg_item):
     now = now_utc()
     messages = []
     
+    # Пріоритет предметів для годівлі від найменшого до найбільшого впливу
     FEED_PRIORITY = ['baton', 'sausage', 'can', 'vodka']
     
-    # Перевіряємо, чи доступна безкоштовна годівля (раз на добу UTC)
-    free_fed_today = last is not None and last.date() == now.date()
-    
-    if not free_fed_today:
+    # Перевіряємо, чи була безкоштовна годівля
+    free_fed = False
+    if last is None or (now - last) >= timedelta(hours=24):
         delta = random.randint(-40, 40)
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
         set_last_feed(chat_id, user_id, now)
         messages.append(f"Безкоштовна кормьожка: {old} кг → {neww} кг (Δ {delta:+d})")
         old = neww
+        free_fed = True
         
+    # Якщо безкоштовна годівля вже була, але користувач знову вводить /feed
     elif not arg_item:
-        next_midnight = (now.date() + timedelta(days=1)).replace(tzinfo=timezone.utc)
-        time_to_midnight = next_midnight - now
-        
-        hours, remainder = divmod(time_to_midnight.total_seconds(), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        time_left_str = f"{int(hours)} год {int(minutes)} хв {int(seconds)} сек"
-        
-        messages.append(f"Безкоштовна кормьожка буде доступна через: {time_left_str}")
-        
         inv = get_inventory(chat_id, user_id)
         item_to_use = None
         for item_key in FEED_PRIORITY:
@@ -383,8 +377,9 @@ def handle_feed(chat_id, user_id, username, arg_item):
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
-            messages.append("У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумним поглядом пішло спати в сховок.")
+            messages.append("У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку.")
 
+    # Обробка випадку, коли користувач вказав предмет (як у поточній реалізації)
     if arg_item:
         key = ALIASES.get(arg_item.lower())
         if not key:
@@ -404,6 +399,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
                     messages.append(f"Використано {ITEMS[key]['u_name']}: {old} кг → {neww} кг (Δ {d:+d})")
                     old = neww
     
+    # Виводимо наявні предмети для годівлі, якщо вони є (додатково до основної логіки)
     inv = get_inventory(chat_id, user_id)
     avail_feed = {k:v for k,v in inv.items() if k in ITEMS and 'feed' in (ITEMS[k]['uses_for'] or [])}
     if avail_feed:
@@ -418,8 +414,10 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
     now = now_utc()
     messages = []
     
+    # Пріоритет предметів для ходки
     ZONEWALK_PRIORITY = ['energy', 'vodka']
     
+    # Функція для виконання одного походу
     def do_one_walk(player):
         cnt = pick_item_count()
         loot = []
@@ -439,25 +437,17 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             s += "Приніс: " + ", ".join(ITEMS[it]['u_name'] for it in loot)
         return s
         
-    # Перевіряємо, чи доступна безкоштовна ходка (раз на добу UTC)
-    free_walked_today = last is not None and last.date() == now.date()
-    
-    if not free_walked_today:
+    # Перевіряємо, чи доступна безкоштовна ходка
+    free_walked = False
+    if last is None or (now - last) >= timedelta(hours=24):
         set_last_zonewalk(chat_id, user_id, now)
         player = ensure_player(chat_id, user_id, username)
         s = "Безкоштовна ходка: " + do_one_walk(player)
         messages.append(s)
+        free_walked = True
     
+    # Якщо безкоштовна ходка вже була, але користувач знову вводить /zonewalk
     elif not arg_item:
-        next_midnight = (now.date() + timedelta(days=1)).replace(tzinfo=timezone.utc)
-        time_to_midnight = next_midnight - now
-        
-        hours, remainder = divmod(time_to_midnight.total_seconds(), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        time_left_str = f"{int(hours)} год {int(minutes)} хв {int(seconds)} сек"
-        
-        messages.append(f"Безкоштовна ходка буде доступна через: {time_left_str}")
-        
         inv = get_inventory(chat_id, user_id)
         item_to_use = None
         for item_key in ZONEWALK_PRIORITY:
@@ -474,8 +464,9 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
-            messages.append("У тебе немає предметів для ходки в інвентарі. Втомлене пацєтко нікуди не пішло і залишилося біля ватри травити анекдоти з іншими пацєтками.")
+            messages.append("У тебе немає предметів для ходки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками.")
     
+    # Обробка випадку, коли користувач вказав предмет (як у поточній реалізації)
     if arg_item:
         key = ALIASES.get(arg_item.lower())
         if not key:
@@ -492,6 +483,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
                     s = f"Використано {ITEMS[key]['u_name']} для додаткової ходки: " + do_one_walk(player)
                     messages.append(s)
     
+    # Виводимо наявні предмети для ходки, якщо вони є (додатково до основної логіки)
     inv = get_inventory(chat_id, user_id)
     zone_items = {k:v for k,v in inv.items() if k in ITEMS and 'zonewalk' in (ITEMS[k]['uses_for'] or [])}
     if zone_items:
@@ -499,7 +491,6 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
         messages.append("У тебе є предмети для додаткових ходок: " + ", ".join(lines))
     
     send_message(chat_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
-
 
 # === Webhook endpoint ===
 @app.route(f"/{TELEGRAM_TOKEN}", methods=['POST'])
@@ -563,4 +554,3 @@ if __name__ == '__main__':
     set_webhook()
     # Run Flask
     app.run(host='0.0.0.0', port=PORT)
-
