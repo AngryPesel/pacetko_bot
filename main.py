@@ -352,17 +352,17 @@ def handle_pet(chat_id, user_id, username):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
     pet_name = row.get('pet_name', 'Пацєтко') # Отримуємо ім'я
-    if random.random() < 0.10:
+    if random.random() < 0.20:
         sign = random.choice([-1,1])
         delta = random.randint(1,3) * sign
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
         if delta > 0:
-            send_message(chat_id, f"Так файно вчухав пацю, що ***{pet_name}*** від радості засвоїв додатково {delta} кг сальця і тепер важить {neww} кг")
+            send_message(chat_id, f"Так файно вчухав пацю, що {pet_name} від радості засвоїв додатково {delta} кг сальця і тепер важить {neww} кг")
         else:
-            send_message(chat_id, f"В цей раз паця сі невподобало чух і напряглося. Через стрес ***{pet_name}*** втратило  {delta} кг сальця і тепер важить {neww} кг")
+            send_message(chat_id, f"В цей раз паця сі невподобало чух і напряглося. Через стрес {pet_name} втратило  {delta} кг сальця і тепер важить {neww} кг")
     else:
-        send_message(chat_id, f"***{pet_name}*** лише задоволено рохнуло і, поправивши протигазик, чавкнуло. Десь збоку дзижчала муха")
+        send_message(chat_id, f"{pet_name} лише задоволено рохнуло і, поправивши протигазик, чавкнуло. Десь збоку дзижчала муха")
 
 def handle_inventory(chat_id, user_id, username):
     ensure_player(chat_id, user_id, username)
@@ -402,14 +402,14 @@ def handle_feed(chat_id, user_id, username, arg_item):
 
             # === Змінено: Умовні повідомлення для дельти ===
             if delta > 0:
-                msg = f"***{pet_name}*** наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз.\n Паця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
+                msg = f"{pet_name} наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз.\n Паця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
             elif delta < 0:
-                msg = f"***{pet_name}*** неохоче поїло, після чого ви чуєте жахливий буркіт живота. Цей старий пиздун в цей раз передав протухші продукти.\n ***{pet_name}*** сильно просралося, втративши {delta:+d} кг сальця і тепер важить {neww} кг"
+                msg = f"{pet_name} неохоче поїло, після чого ви чуєте жахливий буркіт живота. Цей старий пиздун в цей раз передав протухші продукти.\n {pet_name} сильно просралося, втративши {delta:+d} кг сальця і тепер важить {neww} кг"
             else:
-                msg = f"***{pet_name}*** з претензією дивиться на тебе. Схоже, в цей раз старий хрін передав бутлі з водою та мінімум харчів, від яких толку - трохи більше, ніж дірка від бублика.\n Вага ***{pet_name}*** змінилась аж на ЦІЛИХ {delta:+d} кг сальця і важить {neww} кг."
+                msg = f"{pet_name} з претензією дивиться на тебе. Схоже, в цей раз старий хрін передав бутлі з водою та мінімум харчів, від яких толку - трохи більше, ніж дірка від бублика.\n Вага {pet_name} змінилась аж на ЦІЛИХ {delta:+d} кг сальця і важить {neww} кг."
             # ===============================================
 
-            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена: {msg}")
+            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена:\n {msg}")
             old = neww
             free_feeds_left -= 1
             
@@ -429,7 +429,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
                 d = random.randint(a, b)
                 neww = bounded_weight(old, d)
                 update_weight(chat_id, user_id, neww)
-                messages.append(f"У пацєтка бурчить в животі, тому ти використав {ITEMS[item_to_use]['u_name']} з інвентарю: {old} кг → {neww} кг (Δ {d:+d})")
+                messages.append(f"У {pet_name} бурчить в животі, тому ти використав {ITEMS[item_to_use]['u_name']} з інвентарю.\n Паця набрало {delta:+d} кг сальця і тепер важить {neww} кг")
                 old = neww
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
@@ -469,16 +469,16 @@ def handle_feed(chat_id, user_id, username, arg_item):
     
     if free_feeds_left > 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
-        messages.append(f"У тебе залишилось {free_feeds_left} безкоштовних харчів від Бармена до кінця доби. Наступні будуть доступні через {time_left}.")
+        messages.append(f"\n У тебе залишилось {free_feeds_left} безкоштовних харчів від Бармена до кінця доби. Наступні будуть доступні через {time_left}.")
     elif free_feeds_left <= 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
-        messages.append(f" Наступна безкоштовна поставка харчів від Бармена через {time_left}.")
+        messages.append(f"\n Наступна безкоштовна поставка харчів від Бармена через {time_left}.")
 
     inv = get_inventory(chat_id, user_id)
     avail_feed = {k:v for k,v in inv.items() if k in ITEMS and 'feed' in (ITEMS[k]['uses_for'] or [])}
     if avail_feed:
         lines = [f"{ITEMS[k]['u_name']}: {q}" for k,q in avail_feed.items()]
-        messages.append("У тебе є предмети для додаткового харчування: " + ", ".join(lines))
+        messages.append("\n У тебе є предмети для додаткового харчування: " + ", ".join(lines))
     
     send_message(chat_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
 
@@ -486,6 +486,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     last_zonewalk_date = row.get('last_zonewalk_utc')
     zonewalk_count = row.get('daily_zonewalks_count')
+    pet_name = row.get('pet_name', 'Пацєтко') # Отримуємо ім'я
     current_utc_date = now_utc().date()
     messages = []
     
@@ -507,11 +508,11 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
         neww = bounded_weight(oldw, delta)
         update_weight(chat_id, user_id, neww)
         
-        s = f"В процесі ходки паця набрав {delta:+d} кг сальця, і тепер важить {neww} кг."
+        s = f"\n В процесі ходки {pet_name} набрав {delta:+d} кг сальця, і тепер важить {neww} кг."
         if cnt == 0:
             s += "Цей раз без хабаря."
         else:
-            s += "Є хабар! Паця пиніс: " + ", ".join(ITEMS[it]['u_name'] for it in loot)
+            s += f"\n Є хабар! {pet_name} приніс: " + ", ".join(ITEMS[it]['u_name'] for it in loot)
         return s
         
     free_walks_left = DAILY_ZONEWALKS_LIMIT - zonewalk_count
@@ -565,7 +566,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
         messages.append(f"А ще паця заряджене на перемогу і має сил на {free_walks_left} ходок до кінця доби. ")
     elif free_walks_left <= 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
-        messages.append(f"Це були останні сили на сьогодні для походів в Зону у паці. Сили на наступні будуть черех {time_left}.")
+        messages.append(f"\n Це були останні сили на сьогодні для походів в Зону у паці. Сили на наступні будуть черех {time_left}.")
 
     inv = get_inventory(chat_id, user_id)
     zone_items = {k:v for k,v in inv.items() if k in ITEMS and 'zonewalk' in (ITEMS[k]['uses_for'] or [])}
