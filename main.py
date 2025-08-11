@@ -5,12 +5,12 @@ from psycopg2.extras import RealDictCursor
 import requests
 from datetime import datetime, timezone, timedelta
 import random
-import math # Додано для використання math.floor
+import math
 
 # === Configuration from environment ===
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-WEBHOOK_BASE_URL = os.getenv('WEBHOOK_BASE_URL')  # e.g. https://my-service.up.railway.app (no trailing slash)
-DATABASE_URL = os.getenv('DATABASE_URL')  # Railway provided Postgres URL
+WEBHOOK_BASE_URL = os.getenv('WEBHOOK_BASE_URL')
+DATABASE_URL = os.getenv('DATABASE_URL')
 PORT = int(os.getenv('PORT', '8080'))
 
 if not TELEGRAM_TOKEN:
@@ -19,7 +19,7 @@ if not WEBHOOK_BASE_URL:
     print('WARNING: WEBHOOK_BASE_URL not set. Bot will still run but webhook will not be set automatically.')
 
 app = Flask(__name__)
-BOT_USERNAME = None  # збережемо username бота
+BOT_USERNAME = None
 
 def get_bot_username():
     """Отримує username бота з Telegram API."""
@@ -35,10 +35,8 @@ def get_bot_username():
     except Exception as e:
         print("Error getting bot username:", e)
 
-
 # === DB helpers ===
 def get_conn():
-    # use sslmode=require for Railway-managed Postgres
     return psycopg2.connect(DATABASE_URL, sslmode='require')
 
 def init_db():
@@ -49,8 +47,8 @@ def init_db():
       username TEXT,
       pet_name TEXT,
       weight INTEGER NOT NULL DEFAULT 10,
-      last_feed TIMESTAMPTZ,
-      last_zonewalk TIMESTAMPTZ,
+      last_feed_utc DATE,  -- Змінено на DATE для зберігання дати безкоштовної годівлі
+      last_zonewalk_utc DATE,  -- Змінено на DATE для зберігання дати безкоштовної ходки
       created_at TIMESTAMPTZ DEFAULT now(),
       PRIMARY KEY (chat_id, user_id)
     );
@@ -120,38 +118,38 @@ def update_weight(chat_id, user_id, new_weight):
     cur.close()
     conn.close()
 
-def get_last_feed(chat_id, user_id):
+def get_last_feed_date(chat_id, user_id):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT last_feed FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
+    cur.execute("SELECT last_feed_utc FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
     r = cur.fetchone()
     cur.close()
     conn.close()
     return r[0] if r else None
 
-def set_last_feed(chat_id, user_id, ts=None):
-    ts = ts or now_utc()
+def set_last_feed_date(chat_id, user_id, ts=None):
+    ts = ts or now_utc().date()
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE players SET last_feed=%s WHERE chat_id=%s AND user_id=%s", (ts, chat_id, user_id))
+    cur.execute("UPDATE players SET last_feed_utc=%s WHERE chat_id=%s AND user_id=%s", (ts, chat_id, user_id))
     conn.commit()
     cur.close()
     conn.close()
 
-def get_last_zonewalk(chat_id, user_id):
+def get_last_zonewalk_date(chat_id, user_id):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT last_zonewalk FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
+    cur.execute("SELECT last_zonewalk_utc FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
     r = cur.fetchone()
     cur.close()
     conn.close()
     return r[0] if r else None
 
-def set_last_zonewalk(chat_id, user_id, ts=None):
-    ts = ts or now_utc()
+def set_last_zonewalk_date(chat_id, user_id, ts=None):
+    ts = ts or now_utc().date()
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE players SET last_zonewalk=%s WHERE chat_id=%s AND user_id=%s", (ts, chat_id, user_id))
+    cur.execute("UPDATE players SET last_zonewalk_utc=%s WHERE chat_id=%s AND user_id=%s", (ts, chat_id, user_id))
     conn.commit()
     cur.close()
     conn.close()
@@ -234,12 +232,14 @@ def zonewalk_weight_delta():
         return random.randint(1,5)
         
 # === Time formatting helper ===
-def format_timedelta(td: timedelta):
-    """Formats a timedelta object into a human-readable string (e.g., '1h 30m')."""
-    if td.total_seconds() <= 0:
-        return "уже"
+def format_timedelta_to_next_day():
+    """Formats time until the next UTC day as 'Xh Ym'."""
+    now = now_utc()
+    tomorrow_utc = (now + timedelta(days=1)).date()
+    start_of_tomorrow = datetime.combine(tomorrow_utc, datetime.min.time(), tzinfo=timezone.utc)
+    time_left = start_of_tomorrow - now
     
-    hours, remainder = divmod(td.total_seconds(), 3600)
+    hours, remainder = divmod(time_left.total_seconds(), 3600)
     minutes, _ = divmod(remainder, 60)
     
     parts = []
@@ -283,7 +283,7 @@ def handle_start(chat_id):
         "ходити в ходки (/zonewalk). Є інвентар (/inventory), можна назвати пацєтко (/name), "
         "і подивитися топ по вазі (/top).\n\n"
         "Формат команд:\n"
-        "/feed [предмет] - безкоштовна кормьожка раз на 24 години (UTC). Додатково можна вказати предмет з інвентарю для додаткової корміжки.\n"
+        "/feed [предмет] - безкоштовна кормьожка раз на добу (UTC). Додатково можна вказати предмет з інвентарю для додаткової корміжки.\n"
         "/name Ім'я - дати ім'я пацєтці\n"
         "/top - топ 10 пацєток чату за вагою\n"
         "/pet - почухати за вушком\n"
@@ -346,25 +346,23 @@ def handle_inventory(chat_id, user_id, username):
 def handle_feed(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     old = row['weight']
-    last = row['last_feed']
-    now = now_utc()
+    last_feed_date = row['last_feed_utc']
+    current_utc_date = now_utc().date()
     messages = []
     
-    # Пріоритет предметів для годівлі від найменшого до найбільшого впливу
     FEED_PRIORITY = ['baton', 'sausage', 'can', 'vodka']
     
-    # Перевіряємо, чи була безкоштовна годівля
-    free_feed_available = last is None or (now - last) >= timedelta(hours=24)
+    free_feed_available = last_feed_date is None or last_feed_date < current_utc_date
     
     if free_feed_available:
         if not arg_item:
             delta = random.randint(-40, 40)
             neww = bounded_weight(old, delta)
             update_weight(chat_id, user_id, neww)
-            set_last_feed(chat_id, user_id, now)
+            set_last_feed_date(chat_id, user_id, current_utc_date)
             messages.append(f"Безкоштовна кормьожка: {old} кг → {neww} кг (Δ {delta:+d})")
             old = neww
-        
+            
     elif not arg_item:
         inv = get_inventory(chat_id, user_id)
         item_to_use = None
@@ -385,8 +383,8 @@ def handle_feed(chat_id, user_id, username, arg_item):
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
-            time_left = timedelta(hours=24) - (now - last)
-            messages.append(f"У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку. Наступна безкоштовна поставка харчів від Бармена через {format_timedelta(time_left)}.")
+            time_left = format_timedelta_to_next_day()
+            messages.append(f"У тебе немає предметів для годівлі в інвентарі. Пацєтко залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку. Безкоштовна годівля буде доступна через **{time_left}**.")
 
     if arg_item:
         key = ALIASES.get(arg_item.lower())
@@ -407,11 +405,10 @@ def handle_feed(chat_id, user_id, username, arg_item):
                     messages.append(f"Використано {ITEMS[key]['u_name']}: {old} кг → {neww} кг (Δ {d:+d})")
                     old = neww
     
-    # Якщо безкоштовна годівля була, але користувач вказав предмет, додаємо таймер до повідомлення про безкоштовну годівлю
     if free_feed_available and not arg_item:
-        messages[0] += f"\nНаступна безкоштовна годівля буде доступна через 24 год."
+        time_left = format_timedelta_to_next_day()
+        messages.append(f"Наступна безкоштовна годівля буде доступна через **{time_left}**.")
 
-    # Виводимо наявні предмети для годівлі, якщо вони є (додатково до основної логіки)
     inv = get_inventory(chat_id, user_id)
     avail_feed = {k:v for k,v in inv.items() if k in ITEMS and 'feed' in (ITEMS[k]['uses_for'] or [])}
     if avail_feed:
@@ -422,14 +419,12 @@ def handle_feed(chat_id, user_id, username, arg_item):
 
 def handle_zonewalk(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
-    last = row['last_zonewalk']
-    now = now_utc()
+    last_zonewalk_date = row['last_zonewalk_utc']
+    current_utc_date = now_utc().date()
     messages = []
     
-    # Пріоритет предметів для ходки
     ZONEWALK_PRIORITY = ['energy', 'vodka']
     
-    # Функція для виконання одного походу
     def do_one_walk(player):
         cnt = pick_item_count()
         loot = []
@@ -449,12 +444,11 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             s += "Приніс: " + ", ".join(ITEMS[it]['u_name'] for it in loot)
         return s
         
-    # Перевіряємо, чи доступна безкоштовна ходка
-    free_walk_available = last is None or (now - last) >= timedelta(hours=24)
+    free_walk_available = last_zonewalk_date is None or last_zonewalk_date < current_utc_date
     
     if free_walk_available:
         if not arg_item:
-            set_last_zonewalk(chat_id, user_id, now)
+            set_last_zonewalk_date(chat_id, user_id, current_utc_date)
             player = ensure_player(chat_id, user_id, username)
             s = "Безкоштовна ходка: " + do_one_walk(player)
             messages.append(s)
@@ -476,10 +470,9 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
-            time_left = timedelta(hours=24) - (now - last)
-            messages.append(f"Паця втомилося, а у тебе немає ні енергетика, ні горілки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками. Відчуває, що відновить сили для нової ходки через {format_timedelta(time_left)}.")
+            time_left = format_timedelta_to_next_day()
+            messages.append(f"У тебе немає предметів для ходки в інвентарі. Пацєтко нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками. Наступна безкоштовна ходка буде доступна через **{time_left}**.")
     
-    # Обробка випадку, коли користувач вказав предмет (як у поточній реалізації)
     if arg_item:
         key = ALIASES.get(arg_item.lower())
         if not key:
@@ -496,7 +489,10 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
                     s = f"Використано {ITEMS[key]['u_name']} для додаткової ходки: " + do_one_walk(player)
                     messages.append(s)
     
-    # Виводимо наявні предмети для ходки, якщо вони є (додатково до основної логіки)
+    if free_walk_available and not arg_item:
+        time_left = format_timedelta_to_next_day()
+        messages.append(f"Наступна безкоштовна ходка буде доступна через **{time_left}**.")
+
     inv = get_inventory(chat_id, user_id)
     zone_items = {k:v for k,v in inv.items() if k in ITEMS and 'zonewalk' in (ITEMS[k]['uses_for'] or [])}
     if zone_items:
@@ -505,11 +501,11 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
     
     send_message(chat_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
 
+
 # === Webhook endpoint ===
 @app.route(f"/{TELEGRAM_TOKEN}", methods=['POST'])
 def telegram_webhook():
     update = request.get_json()
-    # process commands if message exists
     if not update:
         return jsonify({'ok': True})
     msg = update.get('message') or update.get('edited_message')
@@ -522,17 +518,15 @@ def telegram_webhook():
     username = from_u.get('username')
     text = msg.get('text') or ''
     if not text.startswith('/'):
-        # ignore non-command messages
         return jsonify({'ok': True})
     parts = text.split(maxsplit=1)
     cmd_full = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ''
 
-    # Якщо команда містить @username — перевіряємо, чи вона для нашого бота
     if '@' in cmd_full:
         cmd_name, cmd_user = cmd_full.split('@', 1)
         if BOT_USERNAME and cmd_user != BOT_USERNAME:
-            return jsonify({'ok': True})  # команда іншому боту
+            return jsonify({'ok': True})
         cmd = cmd_name
     else:
         cmd = cmd_full
@@ -560,10 +554,8 @@ def telegram_webhook():
     return jsonify({'ok': True})
 
 if __name__ == '__main__':
-    get_bot_username()  # Отримуємо username бота при старті
-    # init DB and set webhook
+    get_bot_username()
     if DATABASE_URL:
         init_db()
     set_webhook()
-    # Run Flask
     app.run(host='0.0.0.0', port=PORT)
