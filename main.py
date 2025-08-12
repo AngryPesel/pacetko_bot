@@ -569,33 +569,32 @@ def handle_feed(chat_id, user_id, username, arg_item):
     free_feeds_left = DAILY_FEEDS_LIMIT - feed_count
     
     # === Обробка безкоштовної годівлі ===
-     if free_feeds_left > 0:
-        if not arg_item:
-            # Новий рандом для безкоштовної годівлі
-            if random.random() < 0.35:
-                # 40% шанс втрати ваги (від -40 до -1)
-                delta = random.randint(-40, -1)
-            elif random.random() < 0.10:
-                # 5% шанс, що вага не зміниться
-                delta = 0
-            else:
-                # 55% шанс набрати вагу (від 1 до 40)
-                delta = random.randint(1, 40)
-            
-            neww = bounded_weight(old, delta)
-            update_weight(chat_id, user_id, neww)
-            increment_feed_count(chat_id, user_id)
+    if free_feeds_left > 0 and not arg_item:
+        r = random.random()
+        if r < 0.35:
+            # 35% шанс втрати ваги (від -40 до -1)
+            delta = random.randint(-40, -1)
+        elif r < 0.45:
+            # 10% шанс, що вага не зміниться (з 40% по 45%)
+            delta = 0
+        else:
+            # 55% шанс набрати вагу (від 1 до 40)
+            delta = random.randint(1, 40)
+        
+        neww = bounded_weight(old, delta)
+        update_weight(chat_id, user_id, neww)
+        increment_feed_count(chat_id, user_id)
 
-            if delta > 0:
-                msg = f"{pet_name} наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз.\nПаця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
-            elif delta < 0:
-                msg = f"{pet_name} неохоче поїло, після чого ви чуєте жахливий буркіт живота. Цей старий пиздун в цей раз передав протухші продукти.\n{pet_name} сильно просралося, втративши {abs(delta)} кг сальця і тепер важить {neww} кг"
-            else:
-                msg = f"{pet_name} з претензією дивиться на тебе. Схоже, в цей раз старий хрін передав бутлі з водою та мінімум харчів, від яких толку - трохи більше, ніж дірка від бублика.\nВага {pet_name} змінилась аж на ЦІЛИХ {delta:+d} кг сальця і важить {neww} кг."
+        if delta > 0:
+            msg = f"{pet_name} наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз.\nПаця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
+        elif delta < 0:
+            msg = f"{pet_name} неохоче поїло, після чого ви чуєте жахливий буркіт живота. Цей старий пиздун в цей раз передав протухші продукти.\n{pet_name} сильно просралося, втративши {abs(delta)} кг сальця і тепер важить {neww} кг"
+        else:
+            msg = f"{pet_name} з претензією дивиться на тебе. Схоже, в цей раз старий хрін передав бутлі з водою та мінімум харчів, від яких толку - трохи більше, ніж дірка від бублика.\nВага {pet_name} змінилась аж на ЦІЛИХ {delta:+d} кг сальця і важить {neww} кг."
 
-            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена:\n{msg}")
-            old = neww
-            free_feeds_left -= 1
+        messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена:\n{msg}")
+        old = neww
+        free_feeds_left -= 1
             
     # === Обробка, якщо безкоштовних годівль не залишилось, але предмет не вказано ===
     elif not arg_item:
@@ -667,7 +666,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
         messages.append("\nУ тебе є предмети для додаткового харчування: " + ", ".join(lines))
     
     send_message(chat_id, user_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
-
+    
 def handle_zonewalk(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
     last_zonewalk_date = row.get('last_zonewalk_utc')
