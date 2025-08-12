@@ -142,6 +142,13 @@ def init_db():
         cur.execute("ALTER TABLE players ADD COLUMN last_recruitment_utc DATE")
     # =======================================================
     
+    # === NEW FEATURE: Fight cooldown (DB Migration) ===
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name='last_fight_utc'")
+    if not cur.fetchone():
+        print("Adding 'last_fight_utc' column...")
+        cur.execute("ALTER TABLE players ADD COLUMN last_fight_utc TIMESTAMPTZ")
+    # ==================================================
+    
     # Create tables if they don't exist
     cur.execute(sql_players_create)
     cur.execute(sql_inv)
@@ -406,6 +413,9 @@ DAILY_FEEDS_LIMIT = 1
 DAILY_ZONEWALKS_LIMIT = 2
 DAILY_WHEEL_LIMIT = 3
 PET_COOLDOWN_HOURS = 2
+# --- Додано в константи ---
+FIGHT_COOLDOWN_HOURS = 3
+# =========================================================
 
 # === NEW FEATURE: Смерть і вербування (Updated bounded_weight) ===
 def bounded_weight(old, delta):
@@ -467,6 +477,30 @@ def format_timedelta_to_next_day():
     time_left = start_of_tomorrow - now
     
     return format_timedelta(time_left)
+
+# --- Нові хелпери ---
+def update_last_fight_time(chat_id, user_id, ts=None):
+    ts = ts or now_utc()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE players SET last_fight_utc=%s WHERE chat_id=%s AND user_id=%s", (ts, chat_id, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def get_alive_opponents(chat_id, exclude_user_id):
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        SELECT user_id, pet_name, weight FROM players
+        WHERE chat_id=%s AND user_id != %s AND weight > 0
+        ORDER BY weight DESC
+    """, (chat_id, exclude_user_id))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+# =========================================================
 
 # === Telegram helpers ===
 def is_admin(chat_id, user_id):
@@ -543,6 +577,7 @@ def handle_start(chat_id, user_id):
         "/inventory - показати інвентарь\n"
         "/recruit - завербувати нове пацєтко, якщо старе померло.\n"
         "/check_recruits - перевірити кількість пацєток, доступних для вербування.\n"
+        f"/fight - викликати пацєтко на бій (кожні {FIGHT_COOLDOWN_HOURS} год).\n"
         "\nАдмін-команди:\n"
         "/toggle_cleanup - вмикає/вимикає автоочищення повідомлень бота."
         "/clear_chat - видаляє останні повідомлення бота від кожного гравця."
@@ -971,6 +1006,88 @@ def handle_check_recruits(chat_id, user_id, username):
         send_message(chat_id, user_id, f"Наразі у вас немає доступних пацєток для вербування. Нові будуть доступні через {time_left}.")
 # =============================================================
 
+# --- Логіка бою ---
+def process_fight(chat_id, attacker_id, defender_id):
+    attacker = get_player_data(chat_id, attacker_id)
+    defender = get_player_data(chat_id, defender_id)
+
+    if not attacker or attacker['weight'] <= 0:
+        send_message(chat_id, attacker_id, "Твоє пацєтко мертве і не може битися.")
+        return
+    if not defender or defender['weight'] <= 0:
+        send_message(chat_id, attacker_id, "Обране пацєтко вже мертве.")
+        return
+
+    att_delta = random.randint(-3, 3)
+    def_delta = random.randint(-3, 3)
+
+    att_new_weight = bounded_weight(attacker['weight'], att_delta)
+    def_new_weight = bounded_weight(defender['weight'], def_delta)
+
+    update_weight(chat_id, attacker_id, att_new_weight)
+    update_weight(chat_id, defender_id, def_new_weight)
+
+    fight_story = [
+        f"Пацєтко {attacker['pet_name']} ({attacker['weight']} кг) підкотив до {defender['pet_name']} ({defender['weight']} кг).",
+        "Пацєтки схрестили п’ятачки, і почалось... лупцювання, наче за останній батон у барі Сидора!",
+        f"{attacker['pet_name']} {('+ набрав' if att_delta>0 else '- втратив' if att_delta<0 else 'не змінив')} {abs(att_delta)} кг сальця (тепер {att_new_weight} кг)",
+        f"{defender['pet_name']} {('+ набрав' if def_delta>0 else '- втратив' if def_delta<0 else 'не змінив')} {abs(def_delta)} кг сальця (тепер {def_new_weight} кг)"
+    ]
+
+    for pet, pet_id, new_weight, enemy_id in [
+        (attacker, attacker_id, att_new_weight, defender_id),
+        (defender, defender_id, def_new_weight, attacker_id)
+    ]:
+        if new_weight <= 0:
+            kill_pet(chat_id, pet_id)
+            loot = get_inventory(chat_id, pet_id)
+            for item, qty in loot.items():
+                add_item(chat_id, enemy_id, item, qty)
+            fight_story.append(f"💀 {pet['pet_name']} загинув у бою! Переможець хрюкаючи витрушує лут з туші.")
+
+    if att_new_weight > 0 and def_new_weight > 0:
+        fight_story.append("Пацєтки розійшлися на перекур, пообіцявши продовжити якось іншим разом.")
+
+    update_last_fight_time(chat_id, attacker_id)
+    send_message(chat_id, attacker_id, "\n".join(fight_story))
+
+# --- Команда /fight ---
+def handle_fight(chat_id, user_id, username):
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+
+    if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'fight'):
+        return
+
+    last_fight_time = player.get('last_fight_utc')
+    if last_fight_time:
+        elapsed = now_utc() - last_fight_time
+        cooldown = timedelta(hours=FIGHT_COOLDOWN_HOURS)
+        if elapsed < cooldown:
+            time_left = format_timedelta(cooldown - elapsed)
+            send_message(chat_id, user_id, f"Твоє пацєтко ще облизує подряпини після попередньої бійки. Чекай {time_left}.")
+            return
+
+    opponents = get_alive_opponents(chat_id, user_id)
+    if not opponents:
+        send_message(chat_id, user_id, "У цьому чаті немає живих пацєток для битви.")
+        return
+
+    buttons = []
+    for opp in opponents:
+        label = f"{opp['pet_name']} ({opp['weight']} кг)"
+        buttons.append([{"text": label, "callback_data": f"fight:{user_id}:{opp['user_id']}"}])
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": "Вибери, з ким твоя паця піде лупцюватися:",
+        "reply_markup": {"inline_keyboard": buttons}
+    }
+    requests.post(url, json=payload)
+# ========================================================
+
+
 # === NEW FEATURE: Admin commands ===
 def handle_toggle_cleanup(chat_id, user_id):
     if chat_id > 0:
@@ -1020,6 +1137,25 @@ def telegram_webhook():
     update = request.get_json()
     if not update:
         return jsonify({'ok': True})
+        
+    # --- Обробка callback ---
+    callback = update.get('callback_query')
+    if callback:
+        data = callback.get('data')
+        chat_id = callback['message']['chat']['id']
+        from_user = callback['from']
+        user_id = from_user['id']
+
+        if data.startswith("fight:"):
+            _, attacker_id, defender_id = data.split(":")
+            attacker_id = int(attacker_id)
+            defender_id = int(defender_id)
+            if user_id != attacker_id:
+                return jsonify({'ok': True})
+            process_fight(chat_id, attacker_id, defender_id)
+        return jsonify({'ok': True})
+    # ========================================================
+    
     msg = update.get('message') or update.get('edited_message')
     if not msg:
         return jsonify({'ok': True})
@@ -1079,6 +1215,10 @@ def telegram_webhook():
             handle_recruit(chat_id, user_id, username)
         elif cmd == '/check_recruits':
             handle_check_recruits(chat_id, user_id, username)
+        # =======================================================
+        # --- Реєстрація команди ---
+        elif cmd == '/fight':
+            handle_fight(chat_id, user_id, username)
         # =======================================================
         else:
             send_message(chat_id, user_id, 'Невідома команда.')
