@@ -54,6 +54,8 @@ def init_db():
       last_wheel_utc DATE,
       daily_wheel_count INTEGER NOT NULL DEFAULT 0,
       last_pet_utc TIMESTAMPTZ,
+      last_message_id BIGINT,
+      cleanup_enabled BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ DEFAULT now(),
       PRIMARY KEY (chat_id, user_id)
     );
@@ -108,6 +110,20 @@ def init_db():
     if not cur.fetchone():
         print("Adding 'last_pet_utc' column...")
         cur.execute("ALTER TABLE players ADD COLUMN last_pet_utc TIMESTAMPTZ")
+    # =================================================
+    
+    # === NEW FEATURE: Message cleanup (DB Migration) ===
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name='last_message_id'")
+    if not cur.fetchone():
+        print("Adding 'last_message_id' column...")
+        cur.execute("ALTER TABLE players ADD COLUMN last_message_id BIGINT")
+    # =================================================
+    
+    # === NEW FEATURE: Cleanup toggle (DB Migration) ===
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name='cleanup_enabled'")
+    if not cur.fetchone():
+        print("Adding 'cleanup_enabled' column...")
+        cur.execute("ALTER TABLE players ADD COLUMN cleanup_enabled BOOLEAN NOT NULL DEFAULT TRUE")
     # =================================================
 
     # Create tables if they don't exist
@@ -239,6 +255,34 @@ def update_last_pet_time(chat_id, user_id, ts=None):
     conn.close()
 # ===============================================
 
+# === NEW FEATURE: Message cleanup (DB Helper) ===
+def update_last_message_id(chat_id, user_id, message_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE players SET last_message_id=%s WHERE chat_id=%s AND user_id=%s", (message_id, chat_id, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def get_chat_cleanup_status(chat_id):
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT cleanup_enabled FROM players WHERE chat_id=%s LIMIT 1", (chat_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row['cleanup_enabled'] if row else True
+
+def set_chat_cleanup_status(chat_id, status):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE players SET cleanup_enabled=%s WHERE chat_id=%s", (status, chat_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+# ===============================================
+
+
 def get_inventory(chat_id, user_id):
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -362,11 +406,46 @@ def format_timedelta_to_next_day():
 
 
 # === Telegram helpers ===
-def send_message(chat_id, text):
+def is_admin(chat_id, user_id):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getChatMember"
+    payload = {"chat_id": chat_id, "user_id": user_id}
+    try:
+        r = requests.post(url, json=payload, timeout=5)
+        data = r.json()
+        if data.get("ok"):
+            status = data["result"]["status"]
+            return status in ["creator", "administrator"]
+    except Exception as e:
+        print("is_admin error:", e)
+    return False
+
+def delete_message(chat_id, message_id):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteMessage"
+    payload = {"chat_id": chat_id, "message_id": message_id}
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print('delete_message error', e)
+
+def send_message(chat_id, user_id, text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
+    
+    # === NEW FEATURE: Message cleanup ===
+    if chat_id < 0 and get_chat_cleanup_status(chat_id): # Only for group chats with cleanup enabled
+        player = ensure_player(chat_id, user_id, None)
+        last_message_id = player.get('last_message_id')
+        if last_message_id:
+            delete_message(chat_id, last_message_id)
+    # ====================================
+    
     try:
-        requests.post(url, json=payload, timeout=10)
+        r = requests.post(url, json=payload, timeout=10)
+        data = r.json()
+        if data.get('ok'):
+            message_id = data['result']['message_id']
+            update_last_message_id(chat_id, user_id, message_id)
+        return r
     except Exception as e:
         print('send_message error', e)
 
@@ -383,7 +462,7 @@ def set_webhook():
         print('setWebhook failed:', e)
 
 # === Command handlers (simple parsing) ===
-def handle_start(chat_id):
+def handle_start(chat_id, user_id):
     txt = (
         "П.А.Ц.Є.Т.К.О. 2.\n\n"
         "ПАЦЄТКО СІ ВРОДИЛО - РАДІЄ ВСЕ СЕЛО НОВАЧКІВ!\n\n"
@@ -398,13 +477,16 @@ def handle_start(chat_id):
         "/name Ім'я - дати ім'я пацєтці\n"
         "/top - топ-10 Сталкерів Пацєток чату за вагою\n"
         "/inventory - показати інвентарь\n"
+        "\nАдмін-команди:\n"
+        "/toggle_cleanup - вмикає/вимикає автоочищення повідомлень бота."
+        "/clear_chat - видаляє останні повідомлення бота від кожного гравця."
     )
-    send_message(chat_id, txt)
+    send_message(chat_id, user_id, txt)
 
 def handle_name(chat_id, user_id, username, args_text):
     newname = args_text.strip()[:64]
     if not newname:
-        send_message(chat_id, "Вкажи ім'я: /name Ім'я")
+        send_message(chat_id, user_id, "Вкажи ім'я: /name Ім'я")
         return
     ensure_player(chat_id, user_id, username)
     conn = get_conn()
@@ -413,18 +495,18 @@ def handle_name(chat_id, user_id, username, args_text):
     conn.commit()
     cur.close()
     conn.close()
-    send_message(chat_id, f"Готово — твоє пацєтко тепер звати: {newname}")
+    send_message(chat_id, user_id, f"Готово — твоє пацєтко тепер звати: {newname}")
 
-def handle_top(chat_id):
+def handle_top(chat_id, user_id):
     rows = top_players(chat_id, limit=10)
     if not rows:
-        send_message(chat_id, "Ще немає пацєток у цьому чаті.")
+        send_message(chat_id, user_id, "Ще немає пацєток у цьому чаті.")
         return
     lines = []
     for i, p in enumerate(rows, start=1):
         name = p.get('pet_name') or p.get('username') or str(p['user_id'])
         lines.append(f"{i}. {name} — {p['weight']} кг")
-    send_message(chat_id, "Топ пацєток:\n" + "\n".join(lines))
+    send_message(chat_id, user_id, "Топ пацєток:\n" + "\n".join(lines))
 
 def handle_pet(chat_id, user_id, username):
     row = ensure_player(chat_id, user_id, username)
@@ -439,7 +521,7 @@ def handle_pet(chat_id, user_id, username):
         if time_since_last_pet < cooldown:
             time_left = cooldown - time_since_last_pet
             time_left_str = format_timedelta(time_left)
-            send_message(chat_id, f"*звук цвіркунів* {pet_name} ніяк не реагує на чух. \nРаптом {pet_name} ліниво дістає годинник і дає тобі зрозуміти, що воно хоче наступний чух через {time_left_str}.")
+            send_message(chat_id, user_id, f"*звук цвіркунів* {pet_name} ніяк не реагує на чух. \nРаптом {pet_name} ліниво дістає годинник і дає тобі зрозуміти, що воно хоче наступний чух через {time_left_str}.")
             return
 
     # No cooldown, or cooldown has passed
@@ -451,24 +533,24 @@ def handle_pet(chat_id, user_id, username):
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
         if delta > 0:
-            send_message(chat_id, f"Так файно вчухав пацю, що {pet_name} від радості засвоїв додатково {delta} кг сальця і тепер важить {neww} кг")
+            send_message(chat_id, user_id, f"Так файно вчухав пацю, що {pet_name} від радості засвоїв додатково {delta} кг сальця і тепер важить {neww} кг")
         else:
-            send_message(chat_id, f"В цей раз паця сі невподобало чух і напряглося. Через стрес {pet_name} втратило {abs(delta)} кг сальця і тепер важить {neww} кг")
+            send_message(chat_id, user_id, f"В цей раз паця сі невподобало чух і напряглося. Через стрес {pet_name} втратило {abs(delta)} кг сальця і тепер важить {neww} кг")
     else:
-        send_message(chat_id, f"{pet_name} лише задоволено рохнуло і, поправивши протигазик, чавкнуло. Десь збоку дзижчала муха")
+        send_message(chat_id, user_id, f"{pet_name} лише задоволено рохнуло і, поправивши протигазик, чавкнуло. Десь збоку дзижчала муха")
 
 
 def handle_inventory(chat_id, user_id, username):
     ensure_player(chat_id, user_id, username)
     inv = get_inventory(chat_id, user_id)
     if not inv:
-        send_message(chat_id, "Інвентар порожній.")
+        send_message(chat_id, user_id, "Інвентар порожній.")
         return
     lines = []
     for k,q in inv.items():
         u = ITEMS.get(k, {}).get('u_name', k)
         lines.append(f"* {u}: {q}")
-    send_message(chat_id, "Інвентар:\n" + "\n".join(lines))
+    send_message(chat_id, user_id, "Інвентар:\n" + "\n".join(lines))
 
 def handle_feed(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
@@ -570,7 +652,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
         lines = [f"{ITEMS[k]['u_name']}: {q}" for k,q in avail_feed.items()]
         messages.append("\nУ тебе є предмети для додаткового харчування: " + ", ".join(lines))
     
-    send_message(chat_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
+    send_message(chat_id, user_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
 
 def handle_zonewalk(chat_id, user_id, username, arg_item):
     row = ensure_player(chat_id, user_id, username)
@@ -664,7 +746,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
         lines = [f"{ITEMS[k]['u_name']}: {q}" for k,q in zone_items.items()]
         messages.append("У тебе є предмети для додаткових ходок: " + ", ".join(lines))
     
-    send_message(chat_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
+    send_message(chat_id, user_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
 
 # === NEW FEATURE: Колесо Фортуни (Command Handler) ===
 def handle_wheel(chat_id, user_id, username):
@@ -684,7 +766,7 @@ def handle_wheel(chat_id, user_id, username):
 
     if spins_left <= 0:
         time_left = format_timedelta_to_next_day()
-        send_message(chat_id, f"Нажаль, на сьогодні для {pet_name} казино Золотий Хряцик закрите. Охоронці офають з позором {pet_name} і виганяють його з казіка. Наступний деп буде доступний через {time_left}.")
+        send_message(chat_id, user_id, f"Нажаль, на сьогодні для {pet_name} казино Золотий Хряцик закрите. Охоронці офають з позором {pet_name} і виганяють його з казіка. Наступний деп буде доступний через {time_left}.")
         return
         
     reward = spin_wheel()
@@ -695,13 +777,56 @@ def handle_wheel(chat_id, user_id, username):
     
     if reward != "nothing":
         add_item(chat_id, user_id, reward, reward_qty)
-        send_message(chat_id, f"Казіч крутиться, Сидор мутиться... і ви виграли: {reward_name} ({reward_qty} шт)! 🎉\n\nУ {pet_name} залишилося {new_spins_left} депів на сьогодні.")
+        send_message(chat_id, user_id, f"Казіч крутиться, Сидор мутиться... і ви виграли: {reward_name} ({reward_qty} шт)! 🎉\n\nУ {pet_name} залишилося {new_spins_left} депів на сьогодні.")
     else:
-        send_message(chat_id, f"Казіч крутиться, Сидор мутиться... і ви виграли: {reward_name}. \nНа жаль, фортуна сьогодні не на вашому боці. 😬\n\nУ {pet_name} залишилося {new_spins_left} депів на сьогодні.")
+        send_message(chat_id, user_id, f"Казіч крутиться, Сидор мутиться... і ви виграли: {reward_name}. \nНа жаль, фортуна сьогодні не на вашому боці. 😬\n\nУ {pet_name} залишилося {new_spins_left} депів на сьогодні.")
     
     increment_wheel_count(chat_id, user_id)
 # =======================================================
 
+# === NEW FEATURE: Admin commands ===
+def handle_toggle_cleanup(chat_id, user_id):
+    if chat_id > 0:
+        send_message(chat_id, user_id, "Ця команда працює лише в групових чатах.")
+        return
+    if not is_admin(chat_id, user_id):
+        send_message(chat_id, user_id, "Лише адміністратори можуть використовувати цю команду.")
+        return
+    
+    status = not get_chat_cleanup_status(chat_id)
+    set_chat_cleanup_status(chat_id, status)
+    
+    if status:
+        send_message(chat_id, user_id, "Автоматичне очищення повідомлень увімкнено.")
+    else:
+        send_message(chat_id, user_id, "Автоматичне очищення повідомлень вимкнено.")
+    
+def handle_clear_chat(chat_id, user_id):
+    if chat_id > 0:
+        send_message(chat_id, user_id, "Ця команда працює лише в групових чатах.")
+        return
+    if not is_admin(chat_id, user_id):
+        send_message(chat_id, user_id, "Лише адміністратори можуть використовувати цю команду.")
+        return
+    
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT user_id, last_message_id FROM players WHERE chat_id=%s AND last_message_id IS NOT NULL", (chat_id,))
+    players_to_clear = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    if not players_to_clear:
+        send_message(chat_id, user_id, "Немає повідомлень бота для видалення.")
+        return
+
+    for player in players_to_clear:
+        delete_message(chat_id, player['last_message_id'])
+        # Also clear the message ID from the DB to prevent re-deleting
+        update_last_message_id(chat_id, player['user_id'], None)
+
+    send_message(chat_id, user_id, f"Видалено {len(players_to_clear)} останніх повідомлень бота.")
+# ===============================================
 
 # === Webhook endpoint ===
 @app.route(f"/{TELEGRAM_TOKEN}", methods=['POST'])
@@ -718,8 +843,18 @@ def telegram_webhook():
     user_id = from_u.get('id')
     username = from_u.get('username')
     text = msg.get('text') or ''
-    if not text.startswith('/'):
+    message_id = msg.get('message_id')
+    
+    is_command = text.startswith('/')
+    if is_command and chat_id < 0: # Delete user's command message in group chats
+        try:
+            delete_message(chat_id, message_id)
+        except Exception as e:
+            print(f"Failed to delete user's command message: {e}")
+            
+    if not is_command:
         return jsonify({'ok': True})
+        
     parts = text.split(maxsplit=1)
     cmd_full = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ''
@@ -734,11 +869,11 @@ def telegram_webhook():
 
     try:
         if cmd == '/start':
-            handle_start(chat_id)
+            handle_start(chat_id, user_id)
         elif cmd == '/name':
             handle_name(chat_id, user_id, username, arg)
         elif cmd == '/top':
-            handle_top(chat_id)
+            handle_top(chat_id, user_id)
         elif cmd == '/pet':
             handle_pet(chat_id, user_id, username)
         elif cmd == '/inventory':
@@ -751,11 +886,17 @@ def telegram_webhook():
         elif cmd == '/wheel':
             handle_wheel(chat_id, user_id, username)
         # =======================================================
+        # === NEW FEATURE: Admin commands ===
+        elif cmd == '/toggle_cleanup':
+            handle_toggle_cleanup(chat_id, user_id)
+        elif cmd == '/clear_chat':
+            handle_clear_chat(chat_id, user_id)
+        # ===================================
         else:
-            send_message(chat_id, 'Невідома команда.')
+            send_message(chat_id, user_id, 'Невідома команда.')
     except Exception as e:
         print('error handling command', e)
-        send_message(chat_id, 'Сталася помилка при обробці команди.')
+        send_message(chat_id, user_id, 'Сталася помилка при обробці команди.')
     return jsonify({'ok': True})
 
 if __name__ == '__main__':
