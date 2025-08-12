@@ -569,9 +569,19 @@ def handle_feed(chat_id, user_id, username, arg_item):
     free_feeds_left = DAILY_FEEDS_LIMIT - feed_count
     
     # === Обробка безкоштовної годівлі ===
-    if free_feeds_left > 0:
+     if free_feeds_left > 0:
         if not arg_item:
-            delta = random.randint(-40, 40)
+            # Новий рандом для безкоштовної годівлі
+            if random.random() < 0.35:
+                # 40% шанс втрати ваги (від -40 до -1)
+                delta = random.randint(-40, -1)
+            elif random.random() < 0.10:
+                # 5% шанс, що вага не зміниться
+                delta = 0
+            else:
+                # 55% шанс набрати вагу (від 1 до 40)
+                delta = random.randint(1, 40)
+            
             neww = bounded_weight(old, delta)
             update_weight(chat_id, user_id, neww)
             increment_feed_count(chat_id, user_id)
@@ -595,12 +605,16 @@ def handle_feed(chat_id, user_id, username, arg_item):
             if inv.get(item_key, 0) > 0 and 'feed' in ITEMS[item_key]['uses_for']:
                 item_to_use = item_key
                 break
-        
+            
         if item_to_use:
             ok = remove_item(chat_id, user_id, item_to_use, qty=1)
             if ok:
                 a, b = ITEMS[item_to_use]['feed_delta']
-                d = random.randint(a, b)
+                if random.random() < 0.40:
+                    d = random.randint(a, 0)
+                else:
+                    d = random.randint(0, b)
+                    
                 neww = bounded_weight(old, d)
                 update_weight(chat_id, user_id, neww)
                 messages.append(f"У {pet_name} бурчить в животі, тому ти використав {ITEMS[item_to_use]['u_name']} з інвентарю. Паця набрало {d:+d} кг сальця і тепер важить {neww} кг")
