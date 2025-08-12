@@ -413,7 +413,7 @@ DAILY_FEEDS_LIMIT = 1
 DAILY_ZONEWALKS_LIMIT = 2
 DAILY_WHEEL_LIMIT = 3
 PET_COOLDOWN_HOURS = 2
-FIGHT_COOLDOWN_HOURS = 3
+FIGHT_COOLDOWN_HOURS = 2
 # =========================================================
 
 # === NEW FEATURE: Смерть і вербування (Updated bounded_weight) ===
