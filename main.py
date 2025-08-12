@@ -966,7 +966,7 @@ def handle_check_recruits(chat_id, user_id, username):
     time_left = format_timedelta_to_next_day()
 
     if recruits > 0:
-        send_message(chat_id, user_id, f"На ваш моноліт зараз моляться {recruits} пацєток. Завербувати їх можна командою /recruit, якщо ваше поточне пацєтко помре.")
+        send_message(chat_id, user_id, f"На ваш Моноліт зараз моляться {recruits} пацєток. Завербувати їх можна командою /recruit, якщо ваше поточне пацєтко помре.")
     else:
         send_message(chat_id, user_id, f"Наразі у вас немає доступних пацєток для вербування. Нові будуть доступні через {time_left}.")
 # =============================================================
