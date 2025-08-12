@@ -13,6 +13,12 @@ WEBHOOK_BASE_URL = os.getenv('WEBHOOK_BASE_URL')
 DATABASE_URL = os.getenv('DATABASE_URL')
 PORT = int(os.getenv('PORT', '8080'))
 
+# === NEW FEATURE: Смерть і вербування (New parameters) ===
+STARTING_WEIGHT = 30
+DAILY_RECRUITS_LIMIT = 1
+MAX_RECRUITED_PETS = 3
+# ==========================================================
+
 if not TELEGRAM_TOKEN:
     raise RuntimeError('TELEGRAM_TOKEN is not set in environment variables')
 if not WEBHOOK_BASE_URL:
@@ -57,6 +63,8 @@ def init_db():
       last_message_id BIGINT,
       cleanup_enabled BOOLEAN NOT NULL DEFAULT TRUE,
       created_at TIMESTAMPTZ DEFAULT now(),
+      recruited_pets_count INTEGER NOT NULL DEFAULT 0,
+      last_recruitment_utc DATE,
       PRIMARY KEY (chat_id, user_id)
     );
     """
@@ -110,7 +118,7 @@ def init_db():
     if not cur.fetchone():
         print("Adding 'last_pet_utc' column...")
         cur.execute("ALTER TABLE players ADD COLUMN last_pet_utc TIMESTAMPTZ")
-    # =================================================
+    # ===============================================
     
     # === NEW FEATURE: Message cleanup (DB Migration) ===
     cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name='last_message_id'")
@@ -126,6 +134,14 @@ def init_db():
         cur.execute("ALTER TABLE players ADD COLUMN cleanup_enabled BOOLEAN NOT NULL DEFAULT TRUE")
     # =================================================
 
+    # === NEW FEATURE: Смерть і вербування (DB Migration) ===
+    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name='recruited_pets_count'")
+    if not cur.fetchone():
+        print("Adding 'recruited_pets_count' and 'last_recruitment_utc' columns...")
+        cur.execute("ALTER TABLE players ADD COLUMN recruited_pets_count INTEGER NOT NULL DEFAULT 0")
+        cur.execute("ALTER TABLE players ADD COLUMN last_recruitment_utc DATE")
+    # =======================================================
+    
     # Create tables if they don't exist
     cur.execute(sql_players_create)
     cur.execute(sql_inv)
@@ -175,7 +191,7 @@ def ensure_player(chat_id, user_id, username):
     if not row:
         pet_name = f"Пацєтко_{user_id%1000}"
         cur.execute("INSERT INTO players (chat_id, user_id, username, pet_name, weight, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
-                    (chat_id, user_id, username or '', pet_name, 10, now_utc()))
+                    (chat_id, user_id, username or '', pet_name, STARTING_WEIGHT, now_utc()))
         conn.commit()
         cur.execute("SELECT * FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
         row = cur.fetchone()
@@ -282,6 +298,58 @@ def set_chat_cleanup_status(chat_id, status):
     conn.close()
 # ===============================================
 
+# === NEW FEATURE: Смерть і вербування (DB helpers) ===
+def update_recruits_count(chat_id, user_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT recruited_pets_count, last_recruitment_utc FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        return
+
+    recruits, last_date = row
+    current_date = now_utc().date()
+
+    if last_date is None or last_date < current_date:
+        new_recruits = min(recruits + DAILY_RECRUITS_LIMIT, MAX_RECRUITED_PETS)
+        cur.execute("UPDATE players SET recruited_pets_count=%s, last_recruitment_utc=%s WHERE chat_id=%s AND user_id=%s",
+                    (new_recruits, current_date, chat_id, user_id))
+        conn.commit()
+        
+    cur.close()
+    conn.close()
+
+def get_player_data(chat_id, user_id):
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT * FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row
+
+def kill_pet(chat_id, user_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE players SET weight=%s, pet_name=%s, last_feed_utc=NULL, daily_feeds_count=0, last_zonewalk_utc=NULL, daily_zonewalks_count=0, last_wheel_utc=NULL, daily_wheel_count=0, last_pet_utc=NULL WHERE chat_id=%s AND user_id=%s",
+                (0, None, chat_id, user_id))
+    cur.execute("DELETE FROM inventory WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def spawn_pet(chat_id, user_id, username):
+    conn = get_conn()
+    cur = conn.cursor()
+    pet_name = f"Пацєтко_{user_id%1000}"
+    cur.execute("UPDATE players SET weight=%s, pet_name=%s, recruited_pets_count=recruited_pets_count-1, last_feed_utc=NULL, daily_feeds_count=0, last_zonewalk_utc=NULL, daily_zonewalks_count=0, last_wheel_utc=NULL, daily_wheel_count=0, last_pet_utc=NULL WHERE chat_id=%s AND user_id=%s",
+                (STARTING_WEIGHT, pet_name, chat_id, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+# =======================================================
 
 def get_inventory(chat_id, user_id):
     conn = get_conn()
@@ -336,18 +404,14 @@ def top_players(chat_id, limit=10):
 # === Game mechanics ===
 DAILY_FEEDS_LIMIT = 1
 DAILY_ZONEWALKS_LIMIT = 2
-
-# === NEW FEATURE: Колесо Фортуни (Limit) ===
 DAILY_WHEEL_LIMIT = 3
-# ===========================================
-
-# === NEW FEATURE: Pet Cooldown (Limit) ===
 PET_COOLDOWN_HOURS = 2
-# ===========================================
 
+# === NEW FEATURE: Смерть і вербування (Updated bounded_weight) ===
 def bounded_weight(old, delta):
     new = old + delta
-    return max(1, new)
+    return new
+# ====================================================================
 
 def pick_item_count():
     r = random.random()
@@ -404,7 +468,6 @@ def format_timedelta_to_next_day():
     
     return format_timedelta(time_left)
 
-
 # === Telegram helpers ===
 def is_admin(chat_id, user_id):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getChatMember"
@@ -433,10 +496,11 @@ def send_message(chat_id, user_id, text):
     
     # === NEW FEATURE: Message cleanup ===
     if chat_id < 0 and get_chat_cleanup_status(chat_id): # Only for group chats with cleanup enabled
-        player = ensure_player(chat_id, user_id, None)
-        last_message_id = player.get('last_message_id')
-        if last_message_id:
-            delete_message(chat_id, last_message_id)
+        player = get_player_data(chat_id, user_id)
+        if player:
+            last_message_id = player.get('last_message_id')
+            if last_message_id:
+                delete_message(chat_id, last_message_id)
     # ====================================
     
     try:
@@ -477,18 +541,37 @@ def handle_start(chat_id, user_id):
         "/name Ім'я - дати ім'я пацєтці\n"
         "/top - топ-10 Сталкерів Пацєток чату за вагою\n"
         "/inventory - показати інвентарь\n"
+        "/recruit - завербувати нове пацєтко, якщо старе померло.\n"
         "\nАдмін-команди:\n"
         "/toggle_cleanup - вмикає/вимикає автоочищення повідомлень бота."
         "/clear_chat - видаляє останні повідомлення бота від кожного гравця."
     )
     send_message(chat_id, user_id, txt)
 
+# === NEW FEATURE: Смерть і вербування (Death handler check) ===
+def pet_is_dead_check(chat_id, user_id, pet_name, command_name):
+    player = get_player_data(chat_id, user_id)
+    if player and player['weight'] <= 0:
+        recruits = player['recruited_pets_count']
+        if recruits > 0:
+            send_message(chat_id, user_id, f"На жаль, ваше пацєтко померло. Щоб продовжити грати, завербуйте нове за допомогою команди /recruit.\nУ вас є {recruits} пацєток для вербування.")
+        else:
+            time_left = format_timedelta_to_next_day()
+            send_message(chat_id, user_id, f"На жаль, ваше пацєтко померло і у вас немає доступних пацєток для вербування. Нові пацєтки будуть доступні через {time_left}. Чекайте...")
+        return True
+    return False
+# ==============================================================
+
 def handle_name(chat_id, user_id, username, args_text):
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+    if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'name'):
+        return
+        
     newname = args_text.strip()[:64]
     if not newname:
         send_message(chat_id, user_id, "Вкажи ім'я: /name Ім'я")
         return
-    ensure_player(chat_id, user_id, username)
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("UPDATE players SET pet_name=%s WHERE chat_id=%s AND user_id=%s", (newname, chat_id, user_id))
@@ -498,21 +581,29 @@ def handle_name(chat_id, user_id, username, args_text):
     send_message(chat_id, user_id, f"Готово — твоє пацєтко тепер звати: {newname}")
 
 def handle_top(chat_id, user_id):
+    ensure_player(chat_id, user_id, None)
+    update_recruits_count(chat_id, user_id)
     rows = top_players(chat_id, limit=10)
     if not rows:
         send_message(chat_id, user_id, "Ще немає пацєток у цьому чаті.")
         return
     lines = []
     for i, p in enumerate(rows, start=1):
+        if p['weight'] <= 0:
+            continue
         name = p.get('pet_name') or p.get('username') or str(p['user_id'])
         lines.append(f"{i}. {name} — {p['weight']} кг")
     send_message(chat_id, user_id, "Топ пацєток:\n" + "\n".join(lines))
 
 def handle_pet(chat_id, user_id, username):
-    row = ensure_player(chat_id, user_id, username)
-    old = row['weight']
-    pet_name = row.get('pet_name', 'Пацєтко')
-    last_pet_time = row.get('last_pet_utc')
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+    if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'pet'):
+        return
+
+    old = player['weight']
+    pet_name = player.get('pet_name', 'Пацєтко')
+    last_pet_time = player.get('last_pet_utc')
     current_time = now_utc()
     
     if last_pet_time:
@@ -524,7 +615,6 @@ def handle_pet(chat_id, user_id, username):
             send_message(chat_id, user_id, f"*звук цвіркунів* {pet_name} ніяк не реагує на чух. \nРаптом {pet_name} ліниво дістає годинник і дає тобі зрозуміти, що воно хоче наступний чух через {time_left_str}.")
             return
 
-    # No cooldown, or cooldown has passed
     update_last_pet_time(chat_id, user_id, current_time)
     
     if random.random() < 0.30:
@@ -532,6 +622,11 @@ def handle_pet(chat_id, user_id, username):
         delta = random.randint(1,3) * sign
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
+        if neww <= 0:
+            kill_pet(chat_id, user_id)
+            send_message(chat_id, user_id, f"На жаль, {pet_name} так сильно налякалося, що отримало інфаркт і померло. Ви чухали його занадто сильно. Крапка. Кінець. Екран згас.")
+            return
+
         if delta > 0:
             send_message(chat_id, user_id, f"Так файно вчухав пацю, що {pet_name} від радості засвоїв додатково {delta} кг сальця і тепер важить {neww} кг")
         else:
@@ -541,7 +636,11 @@ def handle_pet(chat_id, user_id, username):
 
 
 def handle_inventory(chat_id, user_id, username):
-    ensure_player(chat_id, user_id, username)
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+    if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'inventory'):
+        return
+
     inv = get_inventory(chat_id, user_id)
     if not inv:
         send_message(chat_id, user_id, "Інвентар порожній.")
@@ -553,12 +652,16 @@ def handle_inventory(chat_id, user_id, username):
     send_message(chat_id, user_id, "Інвентар:\n" + "\n".join(lines))
 
 def handle_feed(chat_id, user_id, username, arg_item):
-    row = ensure_player(chat_id, user_id, username)
-    old = row['weight']
-    last_feed_date = row.get('last_feed_utc')
-    feed_count = row.get('daily_feeds_count')
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+    if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'feed'):
+        return
+
+    old = player['weight']
+    last_feed_date = player.get('last_feed_utc')
+    feed_count = player.get('daily_feeds_count')
     current_utc_date = now_utc().date()
-    pet_name = row.get('pet_name', 'Пацєтко')
+    pet_name = player.get('pet_name', 'Пацєтко')
     messages = []
     
     if last_feed_date is None or last_feed_date < current_utc_date:
@@ -571,11 +674,11 @@ def handle_feed(chat_id, user_id, username, arg_item):
     # === Обробка безкоштовної годівлі ===
     if free_feeds_left > 0 and not arg_item:
         r = random.random()
-        if r < 0.35:
-            # 35% шанс втрати ваги (від -40 до -1)
+        if r < 0.40:
+            # 40% шанс втрати ваги (від -40 до -1)
             delta = random.randint(-40, -1)
         elif r < 0.45:
-            # 10% шанс, що вага не зміниться (з 40% по 45%)
+            # 5% шанс, що вага не зміниться (з 40% по 45%)
             delta = 0
         else:
             # 55% шанс набрати вагу (від 1 до 40)
@@ -584,6 +687,11 @@ def handle_feed(chat_id, user_id, username, arg_item):
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
         increment_feed_count(chat_id, user_id)
+        if neww <= 0:
+            kill_pet(chat_id, user_id)
+            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена. Пацєтко дивиться на це, кашляє, і помирає від отруєння. Кінець. Амінь. Інші пацєтки ходять з цибулею і хлібом, бо старий хрін щось там намутив в продуктах.")
+            send_message(chat_id, user_id, '\n'.join(messages))
+            return
 
         if delta > 0:
             msg = f"{pet_name} наминає з апетитом, аж за вухами лящить. Файні харчі старий сьогодні привіз.\nПаця набрало {delta:+d} кг сальця і тепер важить {neww} кг"
@@ -616,6 +724,12 @@ def handle_feed(chat_id, user_id, username, arg_item):
                     
                 neww = bounded_weight(old, d)
                 update_weight(chat_id, user_id, neww)
+                if neww <= 0:
+                    kill_pet(chat_id, user_id)
+                    messages.append(f"У {pet_name} бурчить в животі, і ти вирішив скористатися {ITEMS[item_to_use]['u_name']}. Але замість їжі ти дістав протухлий іспорчений товар, після чого пацєтко помирає від отруєння. Кінець. Амінь.")
+                    send_message(chat_id, user_id, '\n'.join(messages))
+                    return
+
                 messages.append(f"У {pet_name} бурчить в животі, тому ти використав {ITEMS[item_to_use]['u_name']} з інвентарю. Паця набрало {d:+d} кг сальця і тепер важить {neww} кг")
                 old = neww
             else:
@@ -623,7 +737,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
         else:
             time_left = format_timedelta_to_next_day()
             messages.append(f"У тебе немає предметів для годівлі в інвентарі. {pet_name} залишилося голодним і з сумними очима лягло спати на пошарпаний диван в сховку.")
-
+    
     # === Обробка годівлі з вказаним предметом ===
     if arg_item:
         key = ALIASES.get(arg_item.lower())
@@ -641,6 +755,11 @@ def handle_feed(chat_id, user_id, username, arg_item):
                     d = random.randint(a, b)
                     neww = bounded_weight(old, d)
                     update_weight(chat_id, user_id, neww)
+                    if neww <= 0:
+                        kill_pet(chat_id, user_id)
+                        messages.append(f"Пацєтко з'їло {ITEMS[key]['u_name']}, але це виявився небезпечний продукт, і пацєтко померло від отруєння. Кінець. Амінь.")
+                        send_message(chat_id, user_id, '\n'.join(messages))
+                        return
 
                     if d > 0:
                         msg = f"Дав схрумкати {pet_name} {ITEMS[key]['u_name']}, і маєш приріст сальця!"
@@ -666,12 +785,16 @@ def handle_feed(chat_id, user_id, username, arg_item):
         messages.append("\nУ тебе є предмети для додаткового харчування: " + ", ".join(lines))
     
     send_message(chat_id, user_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
-    
+
 def handle_zonewalk(chat_id, user_id, username, arg_item):
-    row = ensure_player(chat_id, user_id, username)
-    last_zonewalk_date = row.get('last_zonewalk_utc')
-    zonewalk_count = row.get('daily_zonewalks_count')
-    pet_name = row.get('pet_name', 'Пацєтко')
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+    if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'zonewalk'):
+        return
+
+    last_zonewalk_date = player.get('last_zonewalk_utc')
+    zonewalk_count = player.get('daily_zonewalks_count')
+    pet_name = player.get('pet_name', 'Пацєтко')
     current_utc_date = now_utc().date()
     messages = []
     
@@ -681,7 +804,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
     
     ZONEWALK_PRIORITY = ['energy', 'vodka']
     
-    def do_one_walk(player):
+    def do_one_walk(player_data):
         cnt = pick_item_count()
         loot = []
         if cnt > 0:
@@ -689,25 +812,32 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             for it in loot:
                 add_item(chat_id, user_id, it, 1)
         delta = zonewalk_weight_delta()
-        oldw = player['weight']
+        oldw = player_data['weight']
         neww = bounded_weight(oldw, delta)
         update_weight(chat_id, user_id, neww)
-        
+
+        if neww <= 0:
+            kill_pet(chat_id, user_id)
+            return "Смерть", f"Під час ходки, {pet_name} наступив на аномалію, і помер. Смерть в зоні – звичне діло. Царство йому небесне. Кінець. Амінь."
+
         s = f"\nВ процесі ходки {pet_name} набрав {delta:+d} кг сальця, і тепер важить {neww} кг."
         if cnt == 0:
             s += "\nЦей раз без хабаря."
         else:
             s += f"\nЄ хабар! {pet_name} приніс: " + ", ".join(f"{ITEMS[it]['u_name']}" for it in loot)
-        return s
+        return "Продовження", s
         
     free_walks_left = DAILY_ZONEWALKS_LIMIT - zonewalk_count
     
     if free_walks_left > 0:
         if not arg_item:
             increment_zonewalk_count(chat_id, user_id)
-            player = ensure_player(chat_id, user_id, username)
-            s = f"Паця напялює протигаз, вдягає рюкзак, вішає за плече автомат і тупцює в Зону." + do_one_walk(player)
-            messages.append(s)
+            player_data = get_player_data(chat_id, user_id)
+            status, s = do_one_walk(player_data)
+            messages.append(f"Паця напялює протигаз, вдягає рюкзак, вішає за плече автомат і тупцює в Зону." + s)
+            if status == "Смерть":
+                send_message(chat_id, user_id, '\n'.join(messages))
+                return
             free_walks_left -= 1
     
     elif not arg_item:
@@ -721,9 +851,12 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
         if item_to_use:
             ok = remove_item(chat_id, user_id, item_to_use, qty=1)
             if ok:
-                player = ensure_player(chat_id, user_id, username)
-                s = f"Пацєтко втомилося, тому ти використав {ITEMS[item_to_use]['u_name']} з інвентарю для додаткової ходки: " + do_one_walk(player)
-                messages.append(s)
+                player_data = get_player_data(chat_id, user_id)
+                status, s = do_one_walk(player_data)
+                messages.append(f"Пацєтко втомилося, тому ти використав {ITEMS[item_to_use]['u_name']} з інвентарю для додаткової ходки: " + s)
+                if status == "Смерть":
+                    send_message(chat_id, user_id, '\n'.join(messages))
+                    return
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
         else:
@@ -742,10 +875,13 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
                 if not ok:
                     messages.append(f"У тебе немає {ITEMS[key]['u_name']} в інвентарі.")
                 else:
-                    player = ensure_player(chat_id, user_id, username)
-                    s = f"Використано {ITEMS[key]['u_name']} для додаткової ходки: " + do_one_walk(player)
-                    messages.append(s)
-    
+                    player_data = get_player_data(chat_id, user_id)
+                    status, s = do_one_walk(player_data)
+                    messages.append(f"Використано {ITEMS[key]['u_name']} для додаткової ходки: " + s)
+                    if status == "Смерть":
+                        send_message(chat_id, user_id, '\n'.join(messages))
+                        return
+
     if free_walks_left > 0 and not arg_item:
         time_left = format_timedelta_to_next_day()
         messages.append(f"\nА ще паця заряджене на перемогу і має сил на {free_walks_left} ходок до кінця доби. ")
@@ -763,17 +899,21 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
 
 # === NEW FEATURE: Колесо Фортуни (Command Handler) ===
 def handle_wheel(chat_id, user_id, username):
-    row = ensure_player(chat_id, user_id, username)
-    last_wheel_date = row.get('last_wheel_utc')
-    wheel_count = row.get('daily_wheel_count')
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+    if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'wheel'):
+        return
+
+    last_wheel_date = player.get('last_wheel_utc')
+    wheel_count = player.get('daily_wheel_count')
     current_utc_date = now_utc().date()
-    pet_name = row.get('pet_name', 'Пацєтко')
+    pet_name = player.get('pet_name', 'Пацєтко')
     
     if last_wheel_date is None or last_wheel_date < current_utc_date:
         wheel_count = 0
         set_last_wheel_date_and_count(chat_id, user_id, current_utc_date, count=0)
     
-    pet_name = row.get('pet_name', 'Пацєтко')
+    pet_name = player.get('pet_name', 'Пацєтко')
 
     spins_left = DAILY_WHEEL_LIMIT - wheel_count
 
@@ -796,6 +936,27 @@ def handle_wheel(chat_id, user_id, username):
     
     increment_wheel_count(chat_id, user_id)
 # =======================================================
+
+# === NEW FEATURE: Смерть і вербування (New command handler) ===
+def handle_recruit(chat_id, user_id, username):
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+    
+    if player['weight'] > 0:
+        send_message(chat_id, user_id, f"Ваше пацєтко ще живе! Ви не можете завербувати нове, доки старе не помре.")
+        return
+
+    recruits = get_player_data(chat_id, user_id)['recruited_pets_count']
+    if recruits <= 0:
+        time_left = format_timedelta_to_next_day()
+        send_message(chat_id, user_id, f"На жаль, у вас немає доступних пацєток для вербування. Нові пацєтки будуть доступні через {time_left}.")
+        return
+
+    spawn_pet(chat_id, user_id, username)
+    player = get_player_data(chat_id, user_id)
+    new_recruits_count = player['recruited_pets_count']
+    send_message(chat_id, user_id, f"Вітаємо! Ви успішно завербували нове пацєтко! Його вага {STARTING_WEIGHT} кг, а звуть {player['pet_name']}. \nУ вас залишилось {new_recruits_count} пацєток для вербування.")
+# =============================================================
 
 # === NEW FEATURE: Admin commands ===
 def handle_toggle_cleanup(chat_id, user_id):
@@ -835,7 +996,6 @@ def handle_clear_chat(chat_id, user_id):
 
     for player in players_to_clear:
         delete_message(chat_id, player['last_message_id'])
-        # Also clear the message ID from the DB to prevent re-deleting
         update_last_message_id(chat_id, player['user_id'], None)
 
     send_message(chat_id, user_id, f"Видалено {len(players_to_clear)} останніх повідомлень бота.")
@@ -895,16 +1055,16 @@ def telegram_webhook():
             handle_feed(chat_id, user_id, username, arg)
         elif cmd == '/zonewalk':
             handle_zonewalk(chat_id, user_id, username, arg)
-        # === NEW FEATURE: Колесо Фортуни (Command Handler) ===
         elif cmd == '/wheel':
             handle_wheel(chat_id, user_id, username)
-        # =======================================================
-        # === NEW FEATURE: Admin commands ===
         elif cmd == '/toggle_cleanup':
             handle_toggle_cleanup(chat_id, user_id)
         elif cmd == '/clear_chat':
             handle_clear_chat(chat_id, user_id)
-        # ===================================
+        # === NEW FEATURE: Смерть і вербування (New command) ===
+        elif cmd == '/recruit':
+            handle_recruit(chat_id, user_id, username)
+        # =======================================================
         else:
             send_message(chat_id, user_id, 'Невідома команда.')
     except Exception as e:
