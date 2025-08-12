@@ -956,7 +956,7 @@ def handle_recruit(chat_id, user_id, username):
     spawn_pet(chat_id, user_id, username)
     player = get_player_data(chat_id, user_id)
     new_recruits_count = player['recruited_pets_count']
-    send_message(chat_id, user_id, f"Ви активуєте ваш Моноліт, призиваючи і вербучи пацєтко. Його вага {STARTING_WEIGHT} кг, а звуть {player['pet_name']}. \nУ вас залишилось {new_recruits_count} вірних пацєток для вербування.")
+    send_message(chat_id, user_id, f"Пацєтко сі вродило!\n\nВи активуєте ваш Моноліт, призиваючи і вербучи пацєтко. \nЙого вага {STARTING_WEIGHT} кг, а звуть {player['pet_name']}. \nУ вас залишилось {new_recruits_count} вірних пацєток для вербування.")
 
 def handle_check_recruits(chat_id, user_id, username):
     player = ensure_player(chat_id, user_id, username)
