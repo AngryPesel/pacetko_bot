@@ -413,7 +413,6 @@ DAILY_FEEDS_LIMIT = 1
 DAILY_ZONEWALKS_LIMIT = 2
 DAILY_WHEEL_LIMIT = 3
 PET_COOLDOWN_HOURS = 2
-# --- Додано в константи ---
 FIGHT_COOLDOWN_HOURS = 3
 # =========================================================
 
@@ -1043,7 +1042,7 @@ def process_fight(chat_id, attacker_id, defender_id):
             loot = get_inventory(chat_id, pet_id)
             for item, qty in loot.items():
                 add_item(chat_id, enemy_id, item, qty)
-            fight_story.append(f"💀 {pet['pet_name']} загинув у бою! Переможець хрюкаючи витрушує лут з туші.")
+            fight_story.append(f"💀 {pet['pet_name']} загинув у бою! Переможець хрюкаючи витрушує лут з туші і лутає хабар.")
 
     if att_new_weight > 0 and def_new_weight > 0:
         fight_story.append("Пацєтки розійшлися на перекур, пообіцявши продовжити якось іншим разом.")
@@ -1055,6 +1054,7 @@ def process_fight(chat_id, attacker_id, defender_id):
 def handle_fight(chat_id, user_id, username):
     player = ensure_player(chat_id, user_id, username)
     update_recruits_count(chat_id, user_id)
+    pet_name = player.get('pet_name', 'Пацєтко')
 
     if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'fight'):
         return
@@ -1065,7 +1065,7 @@ def handle_fight(chat_id, user_id, username):
         cooldown = timedelta(hours=FIGHT_COOLDOWN_HOURS)
         if elapsed < cooldown:
             time_left = format_timedelta(cooldown - elapsed)
-            send_message(chat_id, user_id, f"Твоє пацєтко ще облизує подряпини після попередньої бійки. Чекай {time_left}.")
+            send_message(chat_id, user_id, f"{pet_name} ще облизує подряпини після попередньої бійки і тягне чарку. \n{pet_name} відчуває що буде готовий знову гатитися через {time_left}.")
             return
 
     opponents = get_alive_opponents(chat_id, user_id)
@@ -1143,6 +1143,7 @@ def telegram_webhook():
     if callback:
         data = callback.get('data')
         chat_id = callback['message']['chat']['id']
+        message_id = callback['message']['message_id']
         from_user = callback['from']
         user_id = from_user['id']
 
@@ -1153,6 +1154,7 @@ def telegram_webhook():
             if user_id != attacker_id:
                 return jsonify({'ok': True})
             process_fight(chat_id, attacker_id, defender_id)
+            delete_message(chat_id, message_id)
         return jsonify({'ok': True})
     # ========================================================
     
