@@ -1017,38 +1017,42 @@ def process_fight(chat_id, attacker_id, defender_id):
         send_message(chat_id, attacker_id, "Обране пацєтко вже мертве.")
         return
 
-    att_delta = random.randint(-3, 3)
-    def_delta = random.randint(-3, 3)
+    # Випадковий вибір переможця та переможеного
+    fighters = [attacker, defender]
+    winner_data = random.choice(fighters)
+    loser_data = next(f for f in fighters if f['user_id'] != winner_data['user_id'])
 
-    att_new_weight = bounded_weight(attacker['weight'], att_delta)
-    def_new_weight = bounded_weight(defender['weight'], def_delta)
+    # Випадкові зміни ваги
+    winner_delta = random.randint(1, 5)
+    loser_delta = random.randint(-5, -1)
 
-    update_weight(chat_id, attacker_id, att_new_weight)
-    update_weight(chat_id, defender_id, def_new_weight)
+    winner_new_weight = bounded_weight(winner_data['weight'], winner_delta)
+    loser_new_weight = bounded_weight(loser_data['weight'], loser_delta)
+
+    update_weight(chat_id, winner_data['user_id'], winner_new_weight)
+    update_weight(chat_id, loser_data['user_id'], loser_new_weight)
 
     fight_story = [
-        f"Пацєтко {attacker['pet_name']} ({attacker['weight']} кг) підкотив до {defender['pet_name']} ({defender['weight']} кг).",
-        "Пацєтки схрестили п’ятачки, і почалось... лупцювання, наче за останній батон у барі Сидора!",
-        f"{attacker['pet_name']} {('+ набрав' if att_delta>0 else '- втратив' if att_delta<0 else 'не змінив')} {abs(att_delta)} кг сальця (тепер {att_new_weight} кг)",
-        f"{defender['pet_name']} {('+ набрав' if def_delta>0 else '- втратив' if def_delta<0 else 'не змінив')} {abs(def_delta)} кг сальця (тепер {def_new_weight} кг)"
+        f"Пацєтко {attacker['pet_name']} ({attacker['weight']} кг) підкотило до {defender['pet_name']} ({defender['weight']} кг).",
+        "Пацєтки схрестили п’ятачки, і почалось... лупцювання, наче за останній батон у барі Сидора!"
     ]
 
-    for pet, pet_id, new_weight, enemy_id in [
-        (attacker, attacker_id, att_new_weight, defender_id),
-        (defender, defender_id, def_new_weight, attacker_id)
-    ]:
-        if new_weight <= 0:
-            kill_pet(chat_id, pet_id)
-            loot = get_inventory(chat_id, pet_id)
-            for item, qty in loot.items():
-                add_item(chat_id, enemy_id, item, qty)
-            fight_story.append(f"💀 {pet['pet_name']} загинув у бою! Переможець хрюкаючи витрушує лут з туші і лутає хабар.")
+    fight_story.append(f"💥 Пацєтко {winner_data['pet_name']} добряче відгатило {loser_data['pet_name']}! 💥 ")
+    fight_story.append(f" По результатам потужне {winner_data['pet_name']} набрало {winner_delta} кг сальця і тепер важить {winner_new_weight} кг. \nВіддухопелене і відгачене {loser_data['pet_name']} втратило {abs(loser_delta)} кг сальця і тепер важить {loser_new_weight} кг.")
 
-    if att_new_weight > 0 and def_new_weight > 0:
+    if loser_new_weight <= 0:
+        kill_pet(chat_id, loser_data['user_id'])
+        loot = get_inventory(chat_id, loser_data['user_id'])
+        if loot:
+            for item, qty in loot.items():
+                add_item(chat_id, winner_data['user_id'], item, qty)
+        fight_story.append(f"💀 {loser_data['pet_name']} загинув у бою! Переможець хрюкаючи витрушує лут з туші і лутає хабар.")
+    else:
         fight_story.append("Пацєтки розійшлися на перекур, пообіцявши продовжити якось іншим разом.")
 
     update_last_fight_time(chat_id, attacker_id)
     send_message(chat_id, attacker_id, "\n".join(fight_story))
+
 
 # --- Команда /fight ---
 def handle_fight(chat_id, user_id, username):
