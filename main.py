@@ -19,10 +19,6 @@ DAILY_RECRUITS_LIMIT = 1
 MAX_RECRUITED_PETS = 3
 # ==========================================================
 
-# === NEW FEATURE: Двобої (New parameters) ===
-FIGHT_COOLDOWN_HOURS = 2
-# =================================================
-
 if not TELEGRAM_TOKEN:
     raise RuntimeError('TELEGRAM_TOKEN is not set in environment variables')
 if not WEBHOOK_BASE_URL:
@@ -69,7 +65,6 @@ def init_db():
       created_at TIMESTAMPTZ DEFAULT now(),
       recruited_pets_count INTEGER NOT NULL DEFAULT 0,
       last_recruitment_utc DATE,
-      last_fight_utc TIMESTAMPTZ,
       PRIMARY KEY (chat_id, user_id)
     );
     """
@@ -147,13 +142,6 @@ def init_db():
         cur.execute("ALTER TABLE players ADD COLUMN last_recruitment_utc DATE")
     # =======================================================
     
-    # === NEW FEATURE: Двобої (DB Migration) ===
-    cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='players' AND column_name='last_fight_utc'")
-    if not cur.fetchone():
-        print("Adding 'last_fight_utc' column...")
-        cur.execute("ALTER TABLE players ADD COLUMN last_fight_utc TIMESTAMPTZ")
-    # =======================================================
-
     # Create tables if they don't exist
     cur.execute(sql_players_create)
     cur.execute(sql_inv)
@@ -164,11 +152,11 @@ def init_db():
 
 # === Game data ===
 ITEMS = {
-    "baton": {"u_name": "Батон", "feed_delta": (-5,5), "uses_for": ["feed", "use_on_pet"]},
-    "sausage": {"u_name": "Ковбаса", "feed_delta": (-9,9), "uses_for": ["feed", "use_on_pet"]},
-    "can": {"u_name": 'Консерва "Сніданок Пацєти"', "feed_delta": (-15,15), "uses_for": ["feed", "use_on_pet"]},
-    "vodka": {"u_name": 'Горілка "Пацятки"', "feed_delta": (-25,25), "uses_for": ["feed","zonewalk", "use_on_pet"]},
-    "energy": {"u_name": 'Енергетик "Нон Хрюк"', "feed_delta": None, "uses_for": ["zonewalk", "use_on_pet"]},
+    "baton": {"u_name": "Батон", "feed_delta": (-5,5), "uses_for": ["feed"]},
+    "sausage": {"u_name": "Ковбаса", "feed_delta": (-9,9), "uses_for": ["feed"]},
+    "can": {"u_name": 'Консерва "Сніданок Пацєти"', "feed_delta": (-15,15), "uses_for": ["feed"]},
+    "vodka": {"u_name": 'Горілка "Пацятки"', "feed_delta": (-25,25), "uses_for": ["feed","zonewalk"]},
+    "energy": {"u_name": 'Енергетик "Нон Хрюк"', "feed_delta": None, "uses_for": ["zonewalk"]},
 }
 ALIASES = {
     "батон":"baton","хліб":"baton","baton":"baton",
@@ -342,32 +330,10 @@ def get_player_data(chat_id, user_id):
     conn.close()
     return row
 
-def get_player_by_username(chat_id, username):
-    if not username:
-        return None
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT * FROM players WHERE chat_id=%s AND LOWER(username)=LOWER(%s)", (chat_id, username.lstrip('@')))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    return row
-
-def get_player_by_pet_name(chat_id, pet_name):
-    if not pet_name:
-        return None
-    conn = get_conn()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT * FROM players WHERE chat_id=%s AND LOWER(pet_name)=LOWER(%s)", (chat_id, pet_name))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    return row
-
 def kill_pet(chat_id, user_id):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE players SET weight=%s, pet_name=%s, last_feed_utc=NULL, daily_feeds_count=0, last_zonewalk_utc=NULL, daily_zonewalks_count=0, last_wheel_utc=NULL, daily_wheel_count=0, last_pet_utc=NULL, last_fight_utc=NULL WHERE chat_id=%s AND user_id=%s",
+    cur.execute("UPDATE players SET weight=%s, pet_name=%s, last_feed_utc=NULL, daily_feeds_count=0, last_zonewalk_utc=NULL, daily_zonewalks_count=0, last_wheel_utc=NULL, daily_wheel_count=0, last_pet_utc=NULL WHERE chat_id=%s AND user_id=%s",
                 (0, None, chat_id, user_id))
     cur.execute("DELETE FROM inventory WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
     conn.commit()
@@ -378,7 +344,7 @@ def spawn_pet(chat_id, user_id, username):
     conn = get_conn()
     cur = conn.cursor()
     pet_name = f"Пацєтко_{user_id%1000}"
-    cur.execute("UPDATE players SET weight=%s, pet_name=%s, recruited_pets_count=recruited_pets_count-1, last_feed_utc=NULL, daily_feeds_count=0, last_zonewalk_utc=NULL, daily_zonewalks_count=0, last_wheel_utc=NULL, daily_wheel_count=0, last_pet_utc=NULL, last_fight_utc=NULL WHERE chat_id=%s AND user_id=%s",
+    cur.execute("UPDATE players SET weight=%s, pet_name=%s, recruited_pets_count=recruited_pets_count-1, last_feed_utc=NULL, daily_feeds_count=0, last_zonewalk_utc=NULL, daily_zonewalks_count=0, last_wheel_utc=NULL, daily_wheel_count=0, last_pet_utc=NULL WHERE chat_id=%s AND user_id=%s",
                 (STARTING_WEIGHT, pet_name, chat_id, user_id))
     conn.commit()
     cur.close()
@@ -403,18 +369,6 @@ def add_item(chat_id, user_id, item, qty=1):
         cur.execute("UPDATE inventory SET quantity=quantity+%s WHERE chat_id=%s AND user_id=%s AND item=%s", (qty, chat_id, user_id, item))
     else:
         cur.execute("INSERT INTO inventory (chat_id, user_id, item, quantity) VALUES (%s,%s,%s,%s)", (chat_id, user_id, item, qty))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-def transfer_all_items(chat_id, from_user_id, to_user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT item, quantity FROM inventory WHERE chat_id=%s AND user_id=%s", (chat_id, from_user_id))
-    items_to_transfer = cur.fetchall()
-    for item, quantity in items_to_transfer:
-        add_item(chat_id, to_user_id, item, quantity)
-        remove_item(chat_id, from_user_id, item, quantity)
     conn.commit()
     cur.close()
     conn.close()
@@ -584,8 +538,6 @@ def handle_start(chat_id, user_id):
         f"/zonewalk [предмет] - організувати ходку в небезпечну Зону ({DAILY_ZONEWALKS_LIMIT} разів на добу UTC). Додатково можна тяпнути енергетика або горілки, щоб мати можливість і сили сходити більше разів.\n"
         f"/wheel - крутнути умовне Колесо Фортуни, щоб виграти хабар ({DAILY_WHEEL_LIMIT} раз на добу UTC).\n"
         f"/pet - почухати пацю за вушком (кожні {PET_COOLDOWN_HOURS} год).\n"
-        f"/fight @username - влаштувати кулачний двобій з пацєтком іншого гравця (раз на {FIGHT_COOLDOWN_HOURS} год).\n"
-        f"/use <item> @username - використати свій предмет на пацєтці іншого гравця.\n"
         "/name Ім'я - дати ім'я пацєтці\n"
         "/top - топ-10 Сталкерів Пацєток чату за вагою\n"
         "/inventory - показати інвентарь\n"
@@ -673,7 +625,7 @@ def handle_pet(chat_id, user_id, username):
         update_weight(chat_id, user_id, neww)
         if neww <= 0:
             kill_pet(chat_id, user_id)
-            send_message(chat_id, user_id, f"На жаль, {pet_name} так сильно налякалося, що отримало інфаркт і померло. Ви чухали його занадто сильно. Крапка. Кінець. Екран згас.")
+            send_message(chat_id, user_id, f"На жаль, {pet_name} так сильно налякалося, що отримало інфаркт і померло. Ви чухали його занадто сильно. Фініта ля комеді.")
             return
 
         if delta > 0:
@@ -738,7 +690,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
         increment_feed_count(chat_id, user_id)
         if neww <= 0:
             kill_pet(chat_id, user_id)
-            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена. Пацєтко дивиться на це, кашляє, і помирає від отруєння. Кінець. Амінь. Інші пацєтки ходять з цибулею і хлібом, бо старий хрін щось там намутив в продуктах.")
+            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена: {pet_name} хряцає їжу, після чого так сильно просирається, що вмирає від срачки. Інші пацєтки ходять з цибулею і хлібом, бо старий хрін щось там намутив в продуктах.")
             send_message(chat_id, user_id, '\n'.join(messages))
             return
 
@@ -775,7 +727,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
                 update_weight(chat_id, user_id, neww)
                 if neww <= 0:
                     kill_pet(chat_id, user_id)
-                    messages.append(f"У {pet_name} бурчить в животі, і ти вирішив скористатися {ITEMS[item_to_use]['u_name']}. Але замість їжі ти дістав протухлий іспорчений товар, після чого пацєтко помирає від отруєння. Кінець. Амінь.")
+                    messages.append(f"У {pet_name} бурчить в животі, і ти вирішив скористатися {ITEMS[item_to_use]['u_name']}. Але {ITEMS[item_to_use]['u_name']} виявилось отруєним, після чого пацєтко дає рідким і помирає від отруєння.")
                     send_message(chat_id, user_id, '\n'.join(messages))
                     return
 
@@ -806,7 +758,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
                     update_weight(chat_id, user_id, neww)
                     if neww <= 0:
                         kill_pet(chat_id, user_id)
-                        messages.append(f"Пацєтко з'їло {ITEMS[key]['u_name']}, але це виявився небезпечний продукт, і пацєтко померло від отруєння. Кінець. Амінь.")
+                        messages.append(f"Пацєтко з'їло {ITEMS[key]['u_name']}, але {ITEMS[key]['u_name']} було отруєним і пацєтко смертельно просралося. Фініта ля комеді.")
                         send_message(chat_id, user_id, '\n'.join(messages))
                         return
 
@@ -867,7 +819,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
 
         if neww <= 0:
             kill_pet(chat_id, user_id)
-            return "Смерть", f"Під час ходки, {pet_name} наступив на аномалію, і помер. Смерть в зоні – звичне діло. Царство йому небесне. Кінець. Амінь."
+            return "Смерть", f"Під час ходки, {pet_name} наступив на аномалію, і помер. Смерть в зоні – звичне діло. Царство йому небесне."
 
         s = f"\nВ процесі ходки {pet_name} набрав {delta:+d} кг сальця, і тепер важить {neww} кг."
         if cnt == 0:
@@ -988,283 +940,156 @@ def handle_wheel(chat_id, user_id, username):
 
 # === NEW FEATURE: Смерть і вербування (New command handler) ===
 def handle_recruit(chat_id, user_id, username):
-    player = get_player_data(chat_id, user_id)
-    if player and player['weight'] > 0:
-        send_message(chat_id, user_id, "Ваше пацєтко ще живе. Не треба вербувати нове.")
-        return
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
     
-    if player and player['recruited_pets_count'] > 0:
-        spawn_pet(chat_id, user_id, username)
-        pet_name = get_player_data(chat_id, user_id).get('pet_name')
-        send_message(chat_id, user_id, f"Ти що, думав, що на тебе немає заміни? Звісно є! Нове пацєтко на ім'я {pet_name} готове до пригод!")
-    else:
+    if player['weight'] > 0:
+        send_message(chat_id, user_id, f"Ваше пацєтко ще живе! Ви не можете завербувати нове, доки старе не помре.")
+        return
+
+    recruits = get_player_data(chat_id, user_id)['recruited_pets_count']
+    if recruits <= 0:
         time_left = format_timedelta_to_next_day()
-        send_message(chat_id, user_id, f"У вас немає доступних пацєток для вербування. Нові пацєтки будуть доступні через {time_left}. Чекайте...")
+        send_message(chat_id, user_id, f"На жаль, на ваш Моноліт наразі не молиться жодне паця. Нові послідовники будуть доступні через {time_left}.")
+        return
+
+    spawn_pet(chat_id, user_id, username)
+    player = get_player_data(chat_id, user_id)
+    new_recruits_count = player['recruited_pets_count']
+    send_message(chat_id, user_id, f"Пацєтко сі вродило!\n\nВи активуєте ваш Моноліт, призиваючи і вербучи пацєтко. \nЙого вага {STARTING_WEIGHT} кг, а звуть {player['pet_name']}. \nУ вас залишилось {new_recruits_count} вірних пацєток для вербування.")
 
 def handle_check_recruits(chat_id, user_id, username):
     player = ensure_player(chat_id, user_id, username)
     update_recruits_count(chat_id, user_id)
-    recruits = player['recruited_pets_count']
+    
+    recruits = get_player_data(chat_id, user_id)['recruited_pets_count']
+    time_left = format_timedelta_to_next_day()
+
     if recruits > 0:
-        send_message(chat_id, user_id, f"У вас є {recruits} пацєток для вербування.")
+        send_message(chat_id, user_id, f"На ваш Моноліт зараз моляться {recruits} пацєток. Завербувати їх можна командою /recruit, якщо ваше поточне пацєтко помре.")
     else:
-        time_left = format_timedelta_to_next_day()
-        send_message(chat_id, user_id, f"У вас немає доступних пацєток для вербування. Нові пацєтки будуть доступні через {time_left}.")
-# =======================================================
+        send_message(chat_id, user_id, f"Наразі у вас немає доступних пацєток для вербування. Нові будуть доступні через {time_left}.")
+# =============================================================
 
-# === NEW FEATURE: Двобої та використання предметів на інших гравцях ===
-def handle_fight(chat_id, user_id, username, target_username):
-    player1 = ensure_player(chat_id, user_id, username)
-    if pet_is_dead_check(chat_id, user_id, player1.get('pet_name'), 'fight'):
+# === NEW FEATURE: Admin commands ===
+def handle_toggle_cleanup(chat_id, user_id):
+    if chat_id > 0:
+        send_message(chat_id, user_id, "Ця команда працює лише в групових чатах.")
         return
-
-    player2 = get_player_by_username(chat_id, target_username)
-    if not player2:
-        send_message(chat_id, user_id, f"Пацєтко з кличкою '{target_username}' не знайдений.")
+    if not is_admin(chat_id, user_id):
+        send_message(chat_id, user_id, "Лише адміністратори можуть використовувати цю команду.")
         return
     
-    if player1['user_id'] == player2['user_id']:
-        send_message(chat_id, user_id, "Твоє паця не Тайлер Дерден і не може битися саме з собою.")
-        return
-
-    if pet_is_dead_check(chat_id, player2['user_id'], player2.get('pet_name'), 'fight'):
-        send_message(chat_id, user_id, f"На жаль, пацєтко гравця {player2.get('username', 'невідомий')} померло і не може брати участь в двобої.")
-        return
-
-    last_fight_time1 = player1.get('last_fight_utc')
-    last_fight_time2 = player2.get('last_fight_utc')
-    current_time = now_utc()
-    cooldown = timedelta(hours=FIGHT_COOLDOWN_HOURS)
-
-    if last_fight_time1 and (current_time - last_fight_time1) < cooldown:
-        time_left = cooldown - (current_time - last_fight_time1)
-        time_left_str = format_timedelta(time_left)
-        send_message(chat_id, user_id, f"{player1['pet_name']} втомилося, вже билося і наразі відпчиває. На відновлення йому треба ще {time_left_str}.")
-        return
-
-    if last_fight_time2 and (current_time - last_fight_time2) < cooldown:
-        time_left = cooldown - (current_time - last_fight_time2)
-        time_left_str = format_timedelta(time_left)
-        send_message(chat_id, user_id, f"Пацєтко гравця {player2.get('username', 'невідомий')} нещодавно билося. Воно відпочине ще {time_left_str}.")
-        return
-        
-    update_last_pet_time(chat_id, player1['user_id'], current_time)
-    update_last_pet_time(chat_id, player2['user_id'], current_time)
-
-    update_recruits_count(chat_id, player1['user_id'])
-    update_recruits_count(chat_id, player2['user_id'])
-
-    pet1_name = player1.get('pet_name', 'Пацєтко_1')
-    pet2_name = player2.get('pet_name', 'Пацєтко_2')
-    weight1 = player1['weight']
-    weight2 = player2['weight']
-
-    messages = [f"Пацєтко {pet1_name} (вага {weight1} кг) викликає на махач на копитцях пацєтко {pet2_name} (вага {weight2} кг)!"]
-
-    # Розрахунок переможця на основі ваги
-    winner_weight, loser_weight = (weight1, weight2) if weight1 > weight2 else (weight2, weight1)
+    status = not get_chat_cleanup_status(chat_id)
+    set_chat_cleanup_status(chat_id, status)
     
-    # Більша вага дає перевагу, але не 100% перемогу
-    win_chance_winner = winner_weight / (winner_weight + loser_weight)
-    
-    if random.random() < win_chance_winner:
-        winner_id = player1['user_id'] if weight1 > weight2 else player2['user_id']
-        loser_id = player2['user_id'] if weight1 > weight2 else player1['user_id']
-        winner_name = pet1_name if weight1 > weight2 else pet2_name
-        loser_name = pet2_name if weight1 > weight2 else pet1_name
+    if status:
+        send_message(chat_id, user_id, "Автоматичне очищення повідомлень увімкнено.")
     else:
-        winner_id = player2['user_id'] if weight1 > weight2 else player1['user_id']
-        loser_id = player1['user_id'] if weight1 > weight2 else player2['user_id']
-        winner_name = pet2_name if weight1 > weight2 else pet1_name
-        loser_name = pet1_name if weight1 > weight2 else pet2_name
-        
-    delta_winner = random.randint(1, 3)
-    delta_loser = random.randint(1, 3)
-    
-    new_weight_winner = bounded_weight(get_player_data(chat_id, winner_id)['weight'], delta_winner)
-    new_weight_loser = bounded_weight(get_player_data(chat_id, loser_id)['weight'], -delta_loser)
-
-    update_weight(chat_id, winner_id, new_weight_winner)
-    update_weight(chat_id, loser_id, new_weight_loser)
-    
-    messages.append(f"Переможець: {winner_name}! Він набрав {delta_winner} кг і тепер важить {new_weight_winner} кг.")
-    messages.append(f"Переможений: {loser_name}. Він втратив {delta_loser} кг і тепер важить {new_weight_loser} кг.")
-    
-    # Логіка лутінгу
-    if new_weight_loser <= 0:
-        messages.append(f"Жах, {loser_name} отримав смертельні поранення і помер! {winner_name} забирає весь хабар з його інвентарю.")
-        transfer_all_items(chat_id, loser_id, winner_id)
-        kill_pet(chat_id, loser_id)
-        
-    send_message(chat_id, user_id, "\n".join(messages))
-
-def handle_use(chat_id, user_id, username, args_text):
-    player1 = ensure_player(chat_id, user_id, username)
-    if pet_is_dead_check(chat_id, user_id, player1.get('pet_name'), 'use'):
-        return
-
-    parts = args_text.split()
-    if len(parts) < 2:
-        send_message(chat_id, user_id, "Вкажи предмет і ім'я гравця: /use <предмет> @username")
-        return
-        
-    item_alias = parts[0].lower()
-    target_username = parts[1]
-    
-    item_key = ALIASES.get(item_alias)
-    if not item_key or 'use_on_pet' not in (ITEMS.get(item_key, {}).get('uses_for') or []):
-        send_message(chat_id, user_id, "Цей предмет не можна використовувати на іншому пацєтку.")
-        return
-
-    if not remove_item(chat_id, user_id, item_key):
-        send_message(chat_id, user_id, f"У тебе немає {ITEMS[item_key]['u_name']} в інвентарі.")
-        return
-
-    player2 = get_player_by_username(chat_id, target_username)
-    if not player2:
-        send_message(chat_id, user_id, f"Гравець з нікнеймом '{target_username}' не знайдений.")
-        add_item(chat_id, user_id, item_key, 1) # Повертаємо предмет
-        return
-
-    if player1['user_id'] == player2['user_id']:
-        send_message(chat_id, user_id, "Ти не можеш використати предмет на своєму пацєтку таким чином.")
-        add_item(chat_id, user_id, item_key, 1) # Повертаємо предмет
-        return
-        
-    if pet_is_dead_check(chat_id, player2['user_id'], player2.get('pet_name'), 'use'):
-        send_message(chat_id, user_id, f"На жаль, пацєтко гравця {player2.get('username', 'невідомий')} померло і не може прийняти предмет.")
-        add_item(chat_id, user_id, item_key, 1)
-        return
-
-    pet1_name = player1.get('pet_name', 'Пацєтко_1')
-    pet2_name = player2.get('pet_name', 'Пацєтко_2')
-    
-    messages = []
-    
-    if item_key in ['baton', 'sausage', 'can', 'vodka']:
-        a, b = ITEMS[item_key]['feed_delta']
-        d = random.randint(a, b)
-        new_weight = bounded_weight(player2['weight'], d)
-        update_weight(chat_id, player2['user_id'], new_weight)
-
-        if new_weight <= 0:
-            kill_pet(chat_id, player2['user_id'])
-            messages.append(f"Гравець {username} використав {ITEMS[item_key]['u_name']} на пацєтку {pet2_name}. На жаль, це виявився небезпечний продукт, і пацєтко померло від отруєння. Кінець. Амінь.")
-        else:
-            messages.append(f"Гравець {username} кинув {ITEMS[item_key]['u_name']} пацєтку {pet2_name}. Воно набрало {d:+d} кг і тепер важить {new_weight} кг.")
-
-    elif item_key == 'energy':
-        messages.append(f"Гравець {username} хлюпнув {ITEMS[item_key]['u_name']} на пацєтко {pet2_name}. Від дикого реву і трясіння воно здивовано кліпнуло очима і втекло в кущі. Жодних наслідків.")
-        
-    send_message(chat_id, user_id, "\n".join(messages))
+        send_message(chat_id, user_id, "Автоматичне очищення повідомлень вимкнено.")
     
 def handle_clear_chat(chat_id, user_id):
-    if not is_admin(chat_id, user_id):
-        send_message(chat_id, user_id, "Тільки адміністратори можуть використовувати цю команду.")
+    if chat_id > 0:
+        send_message(chat_id, user_id, "Ця команда працює лише в групових чатах.")
         return
-
+    if not is_admin(chat_id, user_id):
+        send_message(chat_id, user_id, "Лише адміністратори можуть використовувати цю команду.")
+        return
+    
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute("SELECT user_id, last_message_id FROM players WHERE chat_id=%s AND last_message_id IS NOT NULL", (chat_id,))
-    rows = cur.fetchall()
+    players_to_clear = cur.fetchall()
     cur.close()
     conn.close()
 
-    if not rows:
+    if not players_to_clear:
         send_message(chat_id, user_id, "Немає повідомлень бота для видалення.")
         return
 
-    for row in rows:
-        delete_message(chat_id, row['last_message_id'])
-        update_last_message_id(chat_id, row['user_id'], None)
+    for player in players_to_clear:
+        delete_message(chat_id, player['last_message_id'])
+        update_last_message_id(chat_id, player['user_id'], None)
+
+    send_message(chat_id, user_id, f"Видалено {len(players_to_clear)} останніх повідомлень бота.")
+# ===============================================
+
+# === Webhook endpoint ===
+@app.route(f"/{TELEGRAM_TOKEN}", methods=['POST'])
+def telegram_webhook():
+    update = request.get_json()
+    if not update:
+        return jsonify({'ok': True})
+    msg = update.get('message') or update.get('edited_message')
+    if not msg:
+        return jsonify({'ok': True})
+    chat = msg.get('chat') or {}
+    chat_id = chat.get('id')
+    from_u = msg.get('from') or {}
+    user_id = from_u.get('id')
+    username = from_u.get('username')
+    text = msg.get('text') or ''
+    message_id = msg.get('message_id')
     
-    send_message(chat_id, user_id, "Повідомлення бота було очищено.")
+    is_command = text.startswith('/')
+    if is_command and chat_id < 0: # Delete user's command message in group chats
+        try:
+            delete_message(chat_id, message_id)
+        except Exception as e:
+            print(f"Failed to delete user's command message: {e}")
+            
+    if not is_command:
+        return jsonify({'ok': True})
+        
+    parts = text.split(maxsplit=1)
+    cmd_full = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ''
 
-def handle_toggle_cleanup(chat_id, user_id):
-    if not is_admin(chat_id, user_id):
-        send_message(chat_id, user_id, "Тільки адміністратори можуть використовувати цю команду.")
-        return
-
-    current_status = get_chat_cleanup_status(chat_id)
-    new_status = not current_status
-    set_chat_cleanup_status(chat_id, new_status)
-
-    if new_status:
-        send_message(chat_id, user_id, "Автоматичне очищення повідомлень бота тепер увімкнено.")
+    if '@' in cmd_full:
+        cmd_name, cmd_user = cmd_full.split('@', 1)
+        if BOT_USERNAME and cmd_user != BOT_USERNAME:
+            return jsonify({'ok': True})
+        cmd = cmd_name
     else:
-        send_message(chat_id, user_id, "Автоматичне очищення повідомлень бота тепер вимкнено.")
+        cmd = cmd_full
 
-# === Main router ===
-def handle_update(data):
     try:
-        if 'message' not in data:
-            return
-        
-        message = data['message']
-        text = message.get('text', '')
-        chat_id = message['chat']['id']
-        from_user = message.get('from', {})
-        user_id = from_user.get('id')
-        username = from_user.get('username')
-        
-        if user_id is None:
-            return # Skip messages without a user_id
-            
-        if BOT_USERNAME and text.lower().startswith(f'/{BOT_USERNAME}'):
-            text = text[len(f'/{BOT_USERNAME}'):]
-
-        parts = text.split()
-        command = parts[0].lower() if parts else ''
-        args = parts[1:]
-        args_text = ' '.join(args)
-
-        if command == '/start':
+        if cmd == '/start':
             handle_start(chat_id, user_id)
-        elif command == '/name':
-            handle_name(chat_id, user_id, username, args_text)
-        elif command == '/top':
+        elif cmd == '/name':
+            handle_name(chat_id, user_id, username, arg)
+        elif cmd == '/top':
             handle_top(chat_id, user_id)
-        elif command == '/pet':
+        elif cmd == '/pet':
             handle_pet(chat_id, user_id, username)
-        elif command == '/inventory':
+        elif cmd == '/inventory':
             handle_inventory(chat_id, user_id, username)
-        elif command == '/feed':
-            handle_feed(chat_id, user_id, username, args_text)
-        elif command == '/zonewalk':
-            handle_zonewalk(chat_id, user_id, username, args_text)
-        elif command == '/wheel':
+        elif cmd == '/feed':
+            handle_feed(chat_id, user_id, username, arg)
+        elif cmd == '/zonewalk':
+            handle_zonewalk(chat_id, user_id, username, arg)
+        elif cmd == '/wheel':
             handle_wheel(chat_id, user_id, username)
-        elif command == '/recruit':
-            handle_recruit(chat_id, user_id, username)
-        elif command == '/check_recruits':
-            handle_check_recruits(chat_id, user_id, username)
-        elif command == '/fight':
-            handle_fight(chat_id, user_id, username, args_text)
-        elif command == '/use':
-            handle_use(chat_id, user_id, username, args_text)
-        elif command == '/clear_chat':
-            handle_clear_chat(chat_id, user_id)
-        elif command == '/toggle_cleanup':
+        elif cmd == '/toggle_cleanup':
             handle_toggle_cleanup(chat_id, user_id)
-            
+        elif cmd == '/clear_chat':
+            handle_clear_chat(chat_id, user_id)
+        # === NEW FEATURE: Смерть і вербування (New command) ===
+        elif cmd == '/recruit':
+            handle_recruit(chat_id, user_id, username)
+        elif cmd == '/check_recruits':
+            handle_check_recruits(chat_id, user_id, username)
+        # =======================================================
+        else:
+            send_message(chat_id, user_id, 'Невідома команда.')
     except Exception as e:
-        print("Error handling update:", e)
-
-
-@app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
-def webhook():
-    if request.method == 'POST':
-        update = request.json
-        handle_update(update)
-        return jsonify({"status": "ok"})
-    return "ok"
-
-@app.route('/')
-def index():
-    return "Пацєтко 2.0 Bot is running."
+        print('error handling command', e)
+        send_message(chat_id, user_id, 'Сталася помилка при обробці команди.')
+    return jsonify({'ok': True})
 
 if __name__ == '__main__':
     get_bot_username()
-    init_db()
+    if DATABASE_URL:
+        init_db()
     set_webhook()
     app.run(host='0.0.0.0', port=PORT)
