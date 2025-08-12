@@ -727,7 +727,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
                 update_weight(chat_id, user_id, neww)
                 if neww <= 0:
                     kill_pet(chat_id, user_id)
-                    messages.append(f"У {pet_name} бурчить в животі, і ти вирішив скористатися {ITEMS[item_to_use]['u_name']}. Але {ITEMS[item_to_use]['u_name'] виявилось отруєним, після чого пацєтко дає рідким і помирає від отруєння.")
+                    messages.append(f"У {pet_name} бурчить в животі, і ти вирішив скористатися {ITEMS[item_to_use]['u_name']}. Але {ITEMS[item_to_use]['u_name']} виявилось отруєним, після чого пацєтко дає рідким і помирає від отруєння.")
                     send_message(chat_id, user_id, '\n'.join(messages))
                     return
 
