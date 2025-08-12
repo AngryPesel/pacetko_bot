@@ -625,7 +625,7 @@ def handle_pet(chat_id, user_id, username):
         update_weight(chat_id, user_id, neww)
         if neww <= 0:
             kill_pet(chat_id, user_id)
-            send_message(chat_id, user_id, f"На жаль, {pet_name} так сильно налякалося, що отримало інфаркт і померло. Ви чухали його занадто сильно. Крапка. Кінець. Екран згас.")
+            send_message(chat_id, user_id, f"На жаль, {pet_name} так сильно налякалося, що отримало інфаркт і померло. Ви чухали його занадто сильно. Фініта ля комеді.")
             return
 
         if delta > 0:
@@ -690,7 +690,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
         increment_feed_count(chat_id, user_id)
         if neww <= 0:
             kill_pet(chat_id, user_id)
-            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена. Пацєтко дивиться на це, кашляє, і помирає від отруєння. Кінець. Амінь. Інші пацєтки ходять з цибулею і хлібом, бо старий хрін щось там намутив в продуктах.")
+            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена: {pet_name} хряцає їжу, після чого так сильно просирається, що вмирає від срачки. Інші пацєтки ходять з цибулею і хлібом, бо старий хрін щось там намутив в продуктах.")
             send_message(chat_id, user_id, '\n'.join(messages))
             return
 
@@ -727,7 +727,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
                 update_weight(chat_id, user_id, neww)
                 if neww <= 0:
                     kill_pet(chat_id, user_id)
-                    messages.append(f"У {pet_name} бурчить в животі, і ти вирішив скористатися {ITEMS[item_to_use]['u_name']}. Але замість їжі ти дістав протухлий іспорчений товар, після чого пацєтко помирає від отруєння. Кінець. Амінь.")
+                    messages.append(f"У {pet_name} бурчить в животі, і ти вирішив скористатися {ITEMS[item_to_use]['u_name']}. Але {ITEMS[item_to_use]['u_name'] виявилось отруєним, після чого пацєтко дає рідким і помирає від отруєння.")
                     send_message(chat_id, user_id, '\n'.join(messages))
                     return
 
@@ -758,7 +758,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
                     update_weight(chat_id, user_id, neww)
                     if neww <= 0:
                         kill_pet(chat_id, user_id)
-                        messages.append(f"Пацєтко з'їло {ITEMS[key]['u_name']}, але це виявився небезпечний продукт, і пацєтко померло від отруєння. Кінець. Амінь.")
+                        messages.append(f"Пацєтко з'їло {ITEMS[key]['u_name']}, але {ITEMS[key]['u_name']} було отруєним і пацєтко смертельно просралося. Фініта ля комеді.")
                         send_message(chat_id, user_id, '\n'.join(messages))
                         return
 
@@ -819,7 +819,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
 
         if neww <= 0:
             kill_pet(chat_id, user_id)
-            return "Смерть", f"Під час ходки, {pet_name} наступив на аномалію, і помер. Смерть в зоні – звичне діло. Царство йому небесне. Кінець. Амінь."
+            return "Смерть", f"Під час ходки, {pet_name} наступив на аномалію, і помер. Смерть в зоні – звичне діло. Царство йому небесне."
 
         s = f"\nВ процесі ходки {pet_name} набрав {delta:+d} кг сальця, і тепер важить {neww} кг."
         if cnt == 0:
