@@ -14,7 +14,7 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 PORT = int(os.getenv('PORT', '8080'))
 
 # === NEW FEATURE: Смерть і вербування (New parameters) ===
-STARTING_WEIGHT = 30
+STARTING_WEIGHT = 10
 DAILY_RECRUITS_LIMIT = 1
 MAX_RECRUITED_PETS = 3
 # ==========================================================
@@ -542,6 +542,7 @@ def handle_start(chat_id, user_id):
         "/top - топ-10 Сталкерів Пацєток чату за вагою\n"
         "/inventory - показати інвентарь\n"
         "/recruit - завербувати нове пацєтко, якщо старе померло.\n"
+        "/check_recruits - перевірити кількість пацєток, доступних для вербування.\n"
         "\nАдмін-команди:\n"
         "/toggle_cleanup - вмикає/вимикає автоочищення повідомлень бота."
         "/clear_chat - видаляє останні повідомлення бота від кожного гравця."
@@ -949,13 +950,25 @@ def handle_recruit(chat_id, user_id, username):
     recruits = get_player_data(chat_id, user_id)['recruited_pets_count']
     if recruits <= 0:
         time_left = format_timedelta_to_next_day()
-        send_message(chat_id, user_id, f"На жаль, у вас немає доступних пацєток для вербування. Нові пацєтки будуть доступні через {time_left}.")
+        send_message(chat_id, user_id, f"На жаль, на ваш Моноліт наразі не молиться жодне паця. Нові послідовники будуть доступні через {time_left}.")
         return
 
     spawn_pet(chat_id, user_id, username)
     player = get_player_data(chat_id, user_id)
     new_recruits_count = player['recruited_pets_count']
-    send_message(chat_id, user_id, f"Вітаємо! Ви успішно завербували нове пацєтко! Його вага {STARTING_WEIGHT} кг, а звуть {player['pet_name']}. \nУ вас залишилось {new_recruits_count} пацєток для вербування.")
+    send_message(chat_id, user_id, f"Ви активуєте ваш Моноліт, призиваючи і вербучи пацєтко. Його вага {STARTING_WEIGHT} кг, а звуть {player['pet_name']}. \nУ вас залишилось {new_recruits_count} вірних пацєток для вербування.")
+
+def handle_check_recruits(chat_id, user_id, username):
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+    
+    recruits = get_player_data(chat_id, user_id)['recruited_pets_count']
+    time_left = format_timedelta_to_next_day()
+
+    if recruits > 0:
+        send_message(chat_id, user_id, f"На ваш моноліт зараз моляться {recruits} пацєток. Завербувати їх можна командою /recruit, якщо ваше поточне пацєтко помре.")
+    else:
+        send_message(chat_id, user_id, f"Наразі у вас немає доступних пацєток для вербування. Нові будуть доступні через {time_left}.")
 # =============================================================
 
 # === NEW FEATURE: Admin commands ===
@@ -1064,6 +1077,8 @@ def telegram_webhook():
         # === NEW FEATURE: Смерть і вербування (New command) ===
         elif cmd == '/recruit':
             handle_recruit(chat_id, user_id, username)
+        elif cmd == '/check_recruits':
+            handle_check_recruits(chat_id, user_id, username)
         # =======================================================
         else:
             send_message(chat_id, user_id, 'Невідома команда.')
