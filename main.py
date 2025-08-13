@@ -709,15 +709,27 @@ def handle_feed(chat_id, user_id, username, arg_item):
     # === Обробка безкоштовної годівлі ===
     if free_feeds_left > 0 and not arg_item:
         r = random.random()
-        if r < 0.40:
-            # 40% шанс втрати ваги (від -40 до -1)
-            delta = random.randint(-40, -1)
-        elif r < 0.45:
+        if r < 0.35:
+            # 35% шанс втрати ваги (від -40 до -1)
+            delta = random.randint(1, 20)
+        elif r < 0.50:
+            # 15% шанс, що вага не зміниться (з 40% по 45%)
+            delta = random.randint(21, 30)
+        elif r < 0.55:
+            # 5% шанс, що вага не зміниться (з 40% по 45%)
+            delta = random.randint(31, 40)
+        elif r < 0.60:
             # 5% шанс, що вага не зміниться (з 40% по 45%)
             delta = 0
+        elif r < 0.85:
+            # 25% шанс, що вага не зміниться (з 40% по 45%)
+            delta = random.randint(-20, -1)
+        elif r < 0.95:
+            # 10% шанс, що вага не зміниться (з 40% по 45%)
+            delta = random.randint(-30, -21)
         else:
             # 55% шанс набрати вагу (від 1 до 40)
-            delta = random.randint(1, 40)
+            delta = random.randint(-40, -31)
         
         neww = bounded_weight(old, delta)
         update_weight(chat_id, user_id, neww)
@@ -847,6 +859,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             f" {pet_name} був поранений і просив допомоги, але інше пацєтко йомо лише сказало 'До зустрічі!'."
             f" {pet_name} потрапив під Викид і розплавилося на шкварочки."
             f" {pet_name} поліз з цікавості куди не треба і потрапив під вплив іншого Моноліту."
+        ]
 
         # NEW FEATURE: Моментальна смерть
         if random.random() < 0.05: # 5% шанс моментальної смерті
