@@ -840,6 +840,19 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
     ZONEWALK_PRIORITY = ['energy', 'vodka']
     
     def do_one_walk(player_data):
+        death_messages = [
+            f"Під час ходки, {pet_name} загризли собаки.",
+            f" {pet_name} вирішив дослідити закинуте село, і жахливий салосіся висмоктав все сальце у {pet_name}."
+            f" {pet_name} вирішив повеселитися і заліз в Карусель."
+            f" {pet_name} був поранений і просив допомоги, але інше пацєтко йомо лише сказало 'До зустрічі!'."
+            f" {pet_name} потрапив під Викид і розплавилося на шкварочки."
+            f" {pet_name} поліз з цікавості куди не треба і потрапив під вплив іншого Моноліту."
+
+        # NEW FEATURE: Моментальна смерть
+        if random.random() < 0.05: # 5% шанс моментальної смерті
+            kill_pet(chat_id, player_data['user_id'])
+            return "☠️Ще одне пацєтко поглинула Зона...☠️", random.choice(death_messages)
+        
         cnt = pick_item_count()
         loot = []
         if cnt > 0:
