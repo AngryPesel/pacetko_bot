@@ -159,10 +159,10 @@ def init_db():
 
 # === Game data ===
 ITEMS = {
-    "baton": {"u_name": "Батон", "feed_delta": (-5,5), "uses_for": ["feed"]},
-    "sausage": {"u_name": "Ковбаса", "feed_delta": (-9,9), "uses_for": ["feed"]},
-    "can": {"u_name": 'Консерва "Сніданок Пацєти"', "feed_delta": (-15,15), "uses_for": ["feed"]},
-    "vodka": {"u_name": 'Горілка "Пацятки"', "feed_delta": (-25,25), "uses_for": ["feed","zonewalk"]},
+    "baton": {"u_name": "Батон", "feed_delta": (-2,5), "uses_for": ["feed"]},
+    "sausage": {"u_name": "Ковбаса", "feed_delta": (-4,9), "uses_for": ["feed"]},
+    "can": {"u_name": 'Консерва "Сніданок Пацєти"', "feed_delta": (-7,15), "uses_for": ["feed"]},
+    "vodka": {"u_name": 'Горілка "Пацятки"', "feed_delta": (-12,25), "uses_for": ["feed","zonewalk"]},
     "energy": {"u_name": 'Енергетик "Нон Хрюк"', "feed_delta": None, "uses_for": ["zonewalk"]},
 }
 ALIASES = {
