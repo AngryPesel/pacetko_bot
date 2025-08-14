@@ -149,6 +149,17 @@ def init_db():
         cur.execute("ALTER TABLE players ADD COLUMN last_fight_utc TIMESTAMPTZ")
     # ==================================================
     
+    # --- Фрагмент у init_db() --- 
+    cur.execute("""
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name='players' AND column_name='born_utc'
+    """)
+    if not cur.fetchone():
+      print("Adding 'born_utc' column...")
+      cur.execute("ALTER TABLE players ADD COLUMN born_utc TIMESTAMPTZ")
+      cur.execute("UPDATE players SET born_utc = NOW()")
+
     # Create tables if they don't exist
     cur.execute(sql_players_create)
     cur.execute(sql_inv)
@@ -197,8 +208,11 @@ def ensure_player(chat_id, user_id, username):
     row = cur.fetchone()
     if not row:
         pet_name = f"Пацєтко_{user_id%1000}"
-        cur.execute("INSERT INTO players (chat_id, user_id, username, pet_name, weight, created_at) VALUES (%s,%s,%s,%s,%s,%s)",
-                    (chat_id, user_id, username or '', pet_name, STARTING_WEIGHT, now_utc()))
+        # --- Функція створення нового пацєтка ---
+        cur.execute("""
+            INSERT INTO players (chat_id, user_id, username, pet_name, weight, created_at, born_utc)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+        """, (chat_id, user_id, username or '', pet_name, STARTING_WEIGHT, now_utc(), now_utc()))
         conn.commit()
         cur.execute("SELECT * FROM players WHERE chat_id=%s AND user_id=%s", (chat_id, user_id))
         row = cur.fetchone()
@@ -353,6 +367,11 @@ def spawn_pet(chat_id, user_id, username):
     pet_name = f"Пацєтко_{user_id%1000}"
     cur.execute("UPDATE players SET weight=%s, pet_name=%s, recruited_pets_count=recruited_pets_count-1, last_feed_utc=NULL, daily_feeds_count=0, last_zonewalk_utc=NULL, daily_zonewalks_count=0, last_wheel_utc=NULL, daily_wheel_count=0, last_pet_utc=NULL WHERE chat_id=%s AND user_id=%s",
                 (STARTING_WEIGHT, pet_name, chat_id, user_id))
+    # --- Відродження після смерті ---
+    cur.execute(
+        "UPDATE players SET born_utc = %s WHERE chat_id=%s AND user_id=%s",
+        (now_utc(), chat_id, user_id)
+    )
     conn.commit()
     cur.close()
     conn.close()
@@ -402,7 +421,7 @@ def remove_item(chat_id, user_id, item, qty=1):
 def top_players(chat_id, limit=10):
     conn = get_conn()
     cur = conn.cursor(cursor_factory=RealDictCursor)
-    cur.execute("SELECT user_id, username, pet_name, weight FROM players WHERE chat_id=%s ORDER BY weight DESC LIMIT %s", (chat_id, limit))
+    cur.execute("SELECT user_id, username, pet_name, weight, born_utc FROM players WHERE chat_id=%s ORDER BY weight DESC LIMIT %s", (chat_id, limit))
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -499,6 +518,12 @@ def get_alive_opponents(chat_id, exclude_user_id):
     cur.close()
     conn.close()
     return rows
+
+# --- Хелпер --- 
+def get_days_alive(born_utc):
+    if not born_utc:
+        return 0
+    return (now_utc().date() - born_utc.date()).days
 # =========================================================
 
 # === Telegram helpers ===
@@ -623,12 +648,18 @@ def handle_top(chat_id, user_id):
         send_message(chat_id, user_id, "Ще немає пацєток у цьому чаті.")
         return
     lines = []
-    for i, p in enumerate(rows, start=1):
-        if p['weight'] <= 0:
+    # --- Топ пацєток --- 
+    top_pets = rows
+    top_lines = []
+    for rank, row in enumerate(top_pets, start=1):
+        if row['weight'] <= 0:
             continue
-        name = p.get('pet_name') or p.get('username') or str(p['user_id'])
-        lines.append(f"{i}. {name} — {p['weight']} кг")
-    send_message(chat_id, user_id, "Топ пацєток:\n" + "\n".join(lines))
+        days_alive = get_days_alive(row['born_utc'])
+        name = row.get('pet_name') or row.get('username') or str(row['user_id'])
+        line = f"{rank}. {name} — {row['weight']} кг — прожито {days_alive} дн."
+        top_lines.append(line)
+    
+    send_message(chat_id, user_id, "Топ пацєток:\n" + "\n".join(top_lines))
 
 def handle_pet(chat_id, user_id, username):
     player = ensure_player(chat_id, user_id, username)
