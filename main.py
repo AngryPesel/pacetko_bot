@@ -834,7 +834,10 @@ def handle_feed(chat_id, user_id, username, arg_item):
     send_message(chat_id, user_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
 
 def handle_zonewalk(chat_id, user_id, username, arg_item):
-   
+    """
+    Обробляє команду /zonewalk, дозволяючи пацєтку ходити в Зону.
+    Пацєтко може отримати або втратити вагу, знайти хабар або померти.
+    """
     player = ensure_player(chat_id, user_id, username)
     update_recruits_count(chat_id, user_id)
     if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'zonewalk'):
@@ -854,7 +857,9 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
     ZONEWALK_PRIORITY = ['energy', 'vodka']
     
     def do_one_walk(player_data):
-        
+        """
+        Виконує одну ходку і повертає результат.
+        """
         death_messages = [
             f"Під час ходки, {pet_name} загризли собаки.",
             f" {pet_name} вирішив дослідити закинуте село, і жахливий салосіся висмоктав все сальце у {pet_name}.",
