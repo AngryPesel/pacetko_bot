@@ -656,7 +656,7 @@ def handle_top(chat_id, user_id):
             continue
         days_alive = get_days_alive(row['born_utc'])
         name = row.get('pet_name') or row.get('username') or str(row['user_id'])
-        line = f"{rank}. {name} — {row['weight']} кг || в Зоні {days_alive} дн."
+        line = f"{rank}. {name}  |  {row['weight']} кг  |  в Зоні {days_alive} дн."
         top_lines.append(line)
     
     send_message(chat_id, user_id, "Топ пацєток:\n" + "\n".join(top_lines))
