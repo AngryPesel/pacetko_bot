@@ -867,7 +867,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
             kill_pet(chat_id, player_data['user_id'])
             death_title = "☠️Ще одне пацєтко поглинула Зона...☠️"
             death_text = random.choice(death_messages)
-            return "Смерть", f"{death_title}\n{death_text}"
+            return "Смерть", f"\n{death_title}\n{death_text}"
         # =====================================
 
         cnt = pick_item_count()
