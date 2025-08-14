@@ -899,23 +899,23 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
         else:
             s += f"\nЄ хабар! {pet_name} приніс: " + ", ".join(f"{ITEMS[it]['u_name']}" for it in loot)
         return "Продовження", s
-        
-    free_walks_left = DAILY_ZONEWALKS_LIMIT - zonewalk_count
+    
+    walk_happened = False
     
     # Логіка для безкоштовних ходок
-    if free_walks_left > 0:
-        if not arg_item:
-            increment_zonewalk_count(chat_id, user_id)
-            player_data = get_player_data(chat_id, user_id)
-            status, s = do_one_walk(player_data)
-            
-            messages.append(f"Паця напялює протигаз, вдягає рюкзак, вішає за плече автомат і тупцює в Зону.\n{s}")
+    if free_walks_left > 0 and not arg_item:
+        increment_zonewalk_count(chat_id, user_id)
+        player_data = get_player_data(chat_id, user_id)
+        status, s = do_one_walk(player_data)
+        
+        messages.append(f"Паця напялює протигаз, вдягає рюкзак, вішає за плече автомат і тупцює в Зону.\n{s}")
+        
+        if status == "Смерть":
             send_message(chat_id, user_id, '\n'.join(messages))
-            
-            if status == "Смерть":
-                return
-            
-            free_walks_left -= 1
+            return
+        
+        free_walks_left -= 1
+        walk_happened = True
     
     # Логіка для ходок з використанням предметів
     elif not arg_item:
@@ -933,59 +933,58 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
                 status, s = do_one_walk(player_data)
                 
                 messages.append(f"Пацєтко втомилося, тому ти використав {ITEMS[item_to_use]['u_name']} з інвентарю для додаткової ходки: \n{s}")
-                send_message(chat_id, user_id, '\n'.join(messages))
                 
                 if status == "Смерть":
+                    send_message(chat_id, user_id, '\n'.join(messages))
                     return
+                walk_happened = True
             else:
                 messages.append("Якась помилка. Предмет мав бути в інвентарі, але його не знайшли.")
-                send_message(chat_id, user_id, '\n'.join(messages))
         else:
             time_left = format_timedelta_to_next_day()
             messages.append(f"Паця втомилося, а у тебе немає ні енергетика, ні горілки в інвентарі. \n{pet_name} нікуди не пішло і залишилось травити анекдоти біля ватри з іншими пацєтками.")
-            send_message(chat_id, user_id, '\n'.join(messages))
+            
     
     # Логіка для ходок з конкретним предметом
     if arg_item:
         key = ALIASES.get(arg_item.lower())
         if not key:
             messages.append("Невідомий предмет для використання в ходці.")
-            send_message(chat_id, user_id, '\n'.join(messages))
         else:
             if key not in ITEMS or 'zonewalk' not in (ITEMS[key]['uses_for'] or []):
                 messages.append(f"{ITEMS.get(key, {}).get('u_name', key)} не дає можливості ходити в зону.")
-                send_message(chat_id, user_id, '\n'.join(messages))
             else:
                 ok = remove_item(chat_id, user_id, key, qty=1)
                 if not ok:
                     messages.append(f"У тебе немає {ITEMS[key]['u_name']} в інвентарі.")
-                    send_message(chat_id, user_id, '\n'.join(messages))
                 else:
                     player_data = get_player_data(chat_id, user_id)
                     status, s = do_one_walk(player_data)
                     
                     messages.append(f"Використано {ITEMS[key]['u_name']} для додаткової ходки: \n{s}")
-                    send_message(chat_id, user_id, '\n'.join(messages))
                     
                     if status == "Смерть":
+                        send_message(chat_id, user_id, '\n'.join(messages))
                         return
+                    walk_happened = True
 
-    # Загальні повідомлення, якщо пацєтко вижило
-    if free_walks_left > 0 and not arg_item:
-        time_left = format_timedelta_to_next_day()
-        messages.append(f"\nА ще паця заряджене на перемогу і має сил на {free_walks_left} ходок до кінця доби. ")
-    elif free_walks_left <= 0 and not arg_item:
-        time_left = format_timedelta_to_next_day()
-        messages.append(f"\nЦе були останні сили на сьогодні для походів в Зону у паці. Сили на наступні будуть через {time_left}.")
-
+    # Загальні повідомлення, що додаються після успішної ходки
+    if walk_happened:
+        if free_walks_left > 0:
+            messages.append(f"\nА ще паця заряджене на перемогу і має сил на {free_walks_left} ходок до кінця доби. ")
+        elif free_walks_left <= 0:
+            time_left = format_timedelta_to_next_day()
+            messages.append(f"\nЦе були останні сили на сьогодні для походів в Зону у паці. Сили на наступні будуть через {time_left}.")
+    
     inv = get_inventory(chat_id, user_id)
     zone_items = {k:v for k,v in inv.items() if k in ITEMS and 'zonewalk' in (ITEMS[k]['uses_for'] or [])}
     if zone_items:
         lines = [f"{ITEMS[k]['u_name']}: {q}" for k,q in zone_items.items()]
         messages.append("У тебе є предмети для додаткових ходок: " + ", ".join(lines))
     
-    if not arg_item and not (free_walks_left > 0): # Відправляти, якщо не було ходки, але є предмети
-        send_message(chat_id, user_id, '\n'.join(messages) if messages else 'Нічого не сталося.')
+    # Відправлення фінального повідомлення
+    if messages:
+        send_message(chat_id, user_id, '\n'.join(messages))
 
 
 # === NEW FEATURE: Колесо Фортуни (Command Handler) ===
