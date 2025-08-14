@@ -863,7 +863,7 @@ def handle_zonewalk(chat_id, user_id, username, arg_item):
         ]
 
         # === Моментальна смерть (5% шанс) ===
-        if random.random() < 0.99:
+        if random.random() < 0.05:
             kill_pet(chat_id, player_data['user_id'])
             death_title = "☠️Ще одне пацєтко поглинула Зона...☠️"
             death_text = random.choice(death_messages)
