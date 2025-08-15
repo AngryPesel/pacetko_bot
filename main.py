@@ -170,35 +170,32 @@ def init_db():
 
 # === Game data ===
 ITEMS = {
-    "baton": {"u_name": "Батон", "feed_delta": (-2, 5), "uses_for": ["feed"]},
-    "sausage": {"u_name": "Ковбаса", "feed_delta": (-4, 9), "uses_for": ["feed"]},
-    "can": {"u_name": 'Консерва "Сніданок Пацєти"', "feed_delta": (-7, 15), "uses_for": ["feed"]},
-    "vodka": {"u_name": 'Горілка "Пацятки"', "feed_delta": (-12, 25), "uses_for": ["feed", "zonewalk"]},
+    "baton": {"u_name": "Батон", "feed_delta": (-2,5), "uses_for": ["feed", "external_feed"]},
+    "sausage": {"u_name": "Ковбаса", "feed_delta": (-4,9), "uses_for": ["feed", "external_feed"]},
+    "can": {"u_name": 'Консерва "Сніданок Пацєти"', "feed_delta": (-7,15), "uses_for": ["feed", "external_feed"]},
+    "vodka": {"u_name": 'Горілка "Пацятки"', "feed_delta": (-12,25), "uses_for": ["feed", "zonewalk", "external_feed"]},
     "energy": {"u_name": 'Енергетик "Нон Хрюк"', "feed_delta": None, "uses_for": ["zonewalk"]},
-    "low_saloid": {"u_name": "Малий шприц з салоїдами", "feed_delta": (5, 5), "uses_for": ["feed"]},
-    "mid_saloid": {"u_name": "Шприц з салоїдами", "feed_delta": (10, 10), "uses_for": ["feed"]},
-    "big_saloid": {"u_name": "Великий шприц з салоїдами", "feed_delta": (15, 15), "uses_for": ["feed"]},
-    "strange_saloid": {"u_name": "Дивний шприц з салоїдами", "feed_delta": (-50, 50), "uses_for": ["feed"]},
+    "low_saloid": {"u_name": "Малий шприц з салоїдами", "feed_delta": (5,5), "uses_for": ["feed", "external_feed"]},
+    "mid_saloid": {"u_name": "Шприц з салоїдами", "feed_delta": (10,10), "uses_for": ["feed", "external_feed"]},
+    "big_saloid": {"u_name": "Великий шприц з салоїдами", "feed_delta": (15,15), "uses_for": ["feed", "external_feed"]},
+    "strange_saloid": {"u_name": "Дивний шприц з салоїдами", "feed_delta": (-50,50), "uses_for": ["feed", "external_feed"]},
 }
-
 ALIASES = {
-    "батон": "baton", "хліб": "baton", "baton": "baton",
-    "ковбаса": "sausage", "sausage": "sausage",
-    "консерва": "can", "сніданок": "can", "can": "can",
-    "горілка": "vodka", "пацятки": "vodka", "vodka": "vodka",
-    "енергетик": "energy", "енергітик": "energy", "energy": "energy",
+    "батон":"baton","хліб":"baton","baton":"baton",
+    "ковбаса":"sausage","sausage":"sausage",
+    "консерва":"can","сніданок":"can","can":"can",
+    "горілка":"vodka","пацятки":"vodka","vodka":"vodka",
+    "енергетик":"energy","енергітик":"energy","energy":"energy",
     "малий_салоїд": "low_saloid", "малий_шприц": "low_saloid", "low_saloid": "low_saloid",
     "салоїд": "mid_saloid", "шприц": "mid_saloid", "mid_saloid": "mid_saloid",
     "великий_салоїд": "big_saloid", "великий_шприц": "big_saloid", "big_saloid": "big_saloid",
     "дивний_салоїд": "strange_saloid", "дивний_шприц": "strange_saloid", "strange_saloid": "strange_saloid",
 }
 
-# Loot pool for /zonewalk command. The weights should sum up to 100.
 LOOT_POOL = ["baton", "sausage", "can", "vodka", "energy", "low_saloid", "mid_saloid", "big_saloid", "strange_saloid"]
 LOOT_WEIGHTS = [20, 15, 15, 5, 10, 15, 10, 7, 3]
 
 # === NEW FEATURE: Колесо Фортуни (Rewards) ===
-# Rewards for the /wheel command. The weights should sum up to 100.
 WHEEL_REWARDS = {
     "nothing": {"u_name": "Дуля з маком і консервна банка від Сидора", "quantity": 0, "weight": 30},
     "baton": {"u_name": "Батон", "quantity": 1, "weight": 15},
@@ -459,7 +456,7 @@ def bounded_weight(old, delta):
 
 def pick_item_count():
     r = random.random()
-    if r < 0.30:
+    if r < 0.50:
         return 0
     if r < 0.80:
         return 1
@@ -564,9 +561,11 @@ def delete_message(chat_id, message_id):
     except Exception as e:
         print('delete_message error', e)
 
-def send_message(chat_id, user_id, text):
+def send_message(chat_id, user_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload['reply_markup'] = reply_markup
     
     # === NEW FEATURE: Message cleanup ===
     if chat_id < 0 and get_chat_cleanup_status(chat_id): # Only for group chats with cleanup enabled
@@ -618,6 +617,7 @@ def handle_start(chat_id, user_id):
         "/recruit - завербувати нове пацєтко, якщо старе померло.\n"
         "/check_recruits - перевірити кількість пацєток, доступних для вербування.\n"
         f"/fight - викликати пацєтко на бій (кожні {FIGHT_COOLDOWN_HOURS} год).\n"
+        f"/use - використати предмет на іншому пацєтку.\n"
         "\nАдмін-команди:\n"
         "/toggle_cleanup - вмикає/вимикає автоочищення повідомлень бота."
         "/clear_chat - видаляє останні повідомлення бота від кожного гравця."
@@ -672,7 +672,7 @@ def handle_top(chat_id, user_id):
             continue
         days_alive = get_days_alive(row['born_utc'])
         name = row.get('pet_name') or row.get('username') or str(row['user_id'])
-        line = f"{rank}. {name}  |  {row['weight']} кг  |  в Зоні {days_alive} дн."
+        line = f"{rank}. {name} — {row['weight']} кг — прожито {days_alive} дн."
         top_lines.append(line)
     
     send_message(chat_id, user_id, "Топ пацєток:\n" + "\n".join(top_lines))
@@ -775,7 +775,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
             # 10% шанс, що вага не зміниться (з 40% по 45%)
             delta = random.randint(-30, -21)
         else:
-            # 5% шанс набрати вагу (від 1 до 40)
+            # 55% шанс набрати вагу (від 1 до 40)
             delta = random.randint(-40, -31)
         
         neww = bounded_weight(old, delta)
@@ -783,7 +783,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
         increment_feed_count(chat_id, user_id)
         if neww <= 0:
             kill_pet(chat_id, user_id)
-            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена: {pet_name} хряцає їжу, після чого так сильно просирається, що вмирає від срачки. Інколи зустріч з продуктами Бармена гірше, ніж зустріч з салососом.")
+            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена: {pet_name} хряцає їжу, після чого так сильно просирається, що вмирає від срачки. Інші пацєтки ходять з цибулею і хлібом, бо старий хрін щось там намутив в продуктах.")
             send_message(chat_id, user_id, '\n'.join(messages))
             return
 
@@ -1168,6 +1168,71 @@ def handle_fight(chat_id, user_id, username):
     requests.post(url, json=payload)
 # ========================================================
 
+# === NEW FEATURE: External Item Use ===
+def handle_use_item_on_pet(chat_id, user_id, item_key, target_user_id):
+    player = get_player_data(chat_id, user_id)
+    target_player = get_player_data(chat_id, target_user_id)
+    
+    if not player or not target_player:
+        send_message(chat_id, user_id, "Сталася помилка. Спробуй ще раз.")
+        return
+
+    pet_name = player.get('pet_name', 'Пацєтко')
+    target_pet_name = target_player.get('pet_name', 'Пацєтко')
+    
+    if target_player['weight'] <= 0:
+        send_message(chat_id, user_id, f"{target_pet_name} мертве, на ньому не можна використовувати предмети.")
+        return
+        
+    if 'external_feed' not in ITEMS.get(item_key, {}).get('uses_for', []):
+        send_message(chat_id, user_id, f"Предмет {ITEMS[item_key]['u_name']} не може бути використаний на іншому пацєтку.")
+        return
+
+    if not remove_item(chat_id, user_id, item_key, qty=1):
+        send_message(chat_id, user_id, f"У тебе немає {ITEMS[item_key]['u_name']} в інвентарі.")
+        return
+        
+    old_weight = target_player['weight']
+    a, b = ITEMS[item_key]['feed_delta']
+    delta = random.randint(a, b)
+    new_weight = bounded_weight(old_weight, delta)
+    update_weight(chat_id, target_user_id, new_weight)
+    
+    if new_weight <= 0:
+        kill_pet(chat_id, target_user_id)
+        send_message(chat_id, user_id, f"Ти використав {ITEMS[item_key]['u_name']} на {target_pet_name}. На жаль, {target_pet_name} не витримало такої щедрості і померло. Ну, ти зробив усе, що міг...")
+        return
+    
+    if delta > 0:
+        message = f"Ти використав {ITEMS[item_key]['u_name']} на {target_pet_name}. Задоволене паця набрало {delta:+d} кг сальця і тепер важить {new_weight} кг. 🎉"
+    elif delta < 0:
+        message = f"Ти використав {ITEMS[item_key]['u_name']} на {target_pet_name}. На жаль, пацєтко втратило {abs(delta)} кг сальця через {ITEMS[item_key]['u_name']} і тепер важить {new_weight} кг."
+    else:
+        message = f"Ти використав {ITEMS[item_key]['u_name']} на {target_pet_name}. Воно їбало в рот твої подарунки і викинуло його до чортів свинячих. "
+    
+    send_message(chat_id, user_id, message)
+    send_message(chat_id, target_user_id, f"Йобен бобен, ні сталося ні всралося, гості приперлися! Та ще й з гостинцем! \n{pet_name} використав на тобі {ITEMS[item_key]['u_name']}. Тепер твоє паця важить {new_weight} кг.")
+
+
+def handle_use(chat_id, user_id, username):
+    player = ensure_player(chat_id, user_id, username)
+    update_recruits_count(chat_id, user_id)
+    if pet_is_dead_check(chat_id, user_id, player.get('pet_name'), 'use'):
+        return
+
+    inv = get_inventory(chat_id, user_id)
+    usable_items = {k: v for k, v in inv.items() if k in ITEMS and 'external_feed' in ITEMS[k].get('uses_for', [])}
+    
+    if not usable_items:
+        send_message(chat_id, user_id, "У твоєму інвентарі немає предметів, які можна використати на інших пацєтках.")
+        return
+        
+    buttons = []
+    for item_key, qty in usable_items.items():
+        item_name = ITEMS[item_key]['u_name']
+        buttons.append([{"text": f"{item_name} ({qty} шт.)", "callback_data": f"use_item:{user_id}:{item_key}"}])
+    
+    send_message(chat_id, user_id, "Обери предмет, який хочеш використати:", reply_markup={"inline_keyboard": buttons})
 
 # === NEW FEATURE: Admin commands ===
 def handle_toggle_cleanup(chat_id, user_id):
@@ -1236,6 +1301,39 @@ def telegram_webhook():
                 return jsonify({'ok': True})
             process_fight(chat_id, attacker_id, defender_id)
             delete_message(chat_id, message_id)
+        # --- Обробка вибору предмета ---
+        elif data.startswith("use_item:"):
+            _, source_user_id, item_key = data.split(":")
+            if user_id != int(source_user_id):
+                send_message(chat_id, user_id, "Ти не можеш використовувати чужі предмети.")
+                delete_message(chat_id, message_id)
+                return
+            
+            opponents = get_alive_opponents(chat_id, user_id)
+            if not opponents:
+                send_message(chat_id, user_id, "У цьому чаті немає живих пацєток, на яких можна використати предмет.")
+                delete_message(chat_id, message_id)
+                return
+            
+            buttons = []
+            for opp in opponents:
+                label = f"{opp['pet_name']} ({opp['weight']} кг)"
+                buttons.append([{"text": label, "callback_data": f"use_target:{source_user_id}:{item_key}:{opp['user_id']}"}])
+            
+            item_name = ITEMS.get(item_key, {}).get('u_name', item_key)
+            send_message(chat_id, user_id, f"Використовуєш {item_name}. Обери пацєтка:", reply_markup={"inline_keyboard": buttons})
+            delete_message(chat_id, message_id)
+        # --- Обробка вибору цілі ---
+        elif data.startswith("use_target:"):
+            _, source_user_id, item_key, target_user_id = data.split(":")
+            if user_id != int(source_user_id):
+                send_message(chat_id, user_id, "Ти не можеш використовувати чужі предмети.")
+                delete_message(chat_id, message_id)
+                return
+            
+            handle_use_item_on_pet(chat_id, int(source_user_id), item_key, int(target_user_id))
+            delete_message(chat_id, message_id)
+
         return jsonify({'ok': True})
     # ========================================================
     
@@ -1303,6 +1401,8 @@ def telegram_webhook():
         elif cmd == '/fight':
             handle_fight(chat_id, user_id, username)
         # =======================================================
+        elif cmd == '/use':
+            handle_use(chat_id, user_id, username)
         else:
             send_message(chat_id, user_id, 'Невідома команда.')
     except Exception as e:
