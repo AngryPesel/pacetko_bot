@@ -759,7 +759,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
             # 10% шанс, що вага не зміниться (з 40% по 45%)
             delta = random.randint(-30, -21)
         else:
-            # 55% шанс набрати вагу (від 1 до 40)
+            # 5% шанс набрати вагу (від 1 до 40)
             delta = random.randint(-40, -31)
         
         neww = bounded_weight(old, delta)
@@ -767,7 +767,7 @@ def handle_feed(chat_id, user_id, username, arg_item):
         increment_feed_count(chat_id, user_id)
         if neww <= 0:
             kill_pet(chat_id, user_id)
-            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена: {pet_name} хряцає їжу, після чого так сильно просирається, що вмирає від срачки. Інші пацєтки ходять з цибулею і хлібом, бо старий хрін щось там намутив в продуктах.")
+            messages.append(f"Ви відкриваєте безкоштовну поставку харчів від Бармена: {pet_name} хряцає їжу, після чого так сильно просирається, що вмирає від срачки. Інколи зустріч з продуктами Бармена гірше, ніж зустріч з салососом.")
             send_message(chat_id, user_id, '\n'.join(messages))
             return
 
