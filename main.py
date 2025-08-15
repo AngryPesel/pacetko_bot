@@ -170,30 +170,46 @@ def init_db():
 
 # === Game data ===
 ITEMS = {
-    "baton": {"u_name": "Батон", "feed_delta": (-2,5), "uses_for": ["feed"]},
-    "sausage": {"u_name": "Ковбаса", "feed_delta": (-4,9), "uses_for": ["feed"]},
-    "can": {"u_name": 'Консерва "Сніданок Пацєти"', "feed_delta": (-7,15), "uses_for": ["feed"]},
-    "vodka": {"u_name": 'Горілка "Пацятки"', "feed_delta": (-12,25), "uses_for": ["feed","zonewalk"]},
+    "baton": {"u_name": "Батон", "feed_delta": (-2, 5), "uses_for": ["feed"]},
+    "sausage": {"u_name": "Ковбаса", "feed_delta": (-4, 9), "uses_for": ["feed"]},
+    "can": {"u_name": 'Консерва "Сніданок Пацєти"', "feed_delta": (-7, 15), "uses_for": ["feed"]},
+    "vodka": {"u_name": 'Горілка "Пацятки"', "feed_delta": (-12, 25), "uses_for": ["feed", "zonewalk"]},
     "energy": {"u_name": 'Енергетик "Нон Хрюк"', "feed_delta": None, "uses_for": ["zonewalk"]},
-}
-ALIASES = {
-    "батон":"baton","хліб":"baton","baton":"baton",
-    "ковбаса":"sausage","sausage":"sausage",
-    "консерва":"can","сніданок":"can","can":"can",
-    "горілка":"vodka","пацятки":"vodka","vodka":"vodka",
-    "енергетик":"energy","енергітик":"energy","energy":"energy"
+    "low_saloid": {"u_name": "Малий шприц з салоїдами", "feed_delta": (5, 5), "uses_for": ["feed"]},
+    "mid_saloid": {"u_name": "Шприц з салоїдами", "feed_delta": (10, 10), "uses_for": ["feed"]},
+    "big_saloid": {"u_name": "Великий шприц з салоїдами", "feed_delta": (15, 15), "uses_for": ["feed"]},
+    "strange_saloid": {"u_name": "Дивний шприц з салоїдами", "feed_delta": (-50, 50), "uses_for": ["feed"]},
 }
 
-LOOT_POOL = ["baton","sausage","can","vodka","energy"]
-LOOT_WEIGHTS = [35,30,13,7,15]
+ALIASES = {
+    "батон": "baton", "хліб": "baton", "baton": "baton",
+    "ковбаса": "sausage", "sausage": "sausage",
+    "консерва": "can", "сніданок": "can", "can": "can",
+    "горілка": "vodka", "пацятки": "vodka", "vodka": "vodka",
+    "енергетик": "energy", "енергітик": "energy", "energy": "energy",
+    "малий_салоїд": "low_saloid", "малий_шприц": "low_saloid", "low_saloid": "low_saloid",
+    "салоїд": "mid_saloid", "шприц": "mid_saloid", "mid_saloid": "mid_saloid",
+    "великий_салоїд": "big_saloid", "великий_шприц": "big_saloid", "big_saloid": "big_saloid",
+    "дивний_салоїд": "strange_saloid", "дивний_шприц": "strange_saloid", "strange_saloid": "strange_saloid",
+}
+
+# Loot pool for /zonewalk command. The weights should sum up to 100.
+LOOT_POOL = ["baton", "sausage", "can", "vodka", "energy", "low_saloid", "mid_saloid", "big_saloid", "strange_saloid"]
+LOOT_WEIGHTS = [20, 15, 15, 5, 10, 15, 10, 7, 3]
 
 # === NEW FEATURE: Колесо Фортуни (Rewards) ===
+# Rewards for the /wheel command. The weights should sum up to 100.
 WHEEL_REWARDS = {
-    "nothing": {"u_name": "Дуля з маком і консервна банка від Сидора", "quantity": 0, "weight": 40},
-    "baton": {"u_name": "Батон", "quantity": 1, "weight": 20},
-    "sausage": {"u_name": "Ковбаса", "quantity": 1, "weight": 20},
+    "nothing": {"u_name": "Дуля з маком і консервна банка від Сидора", "quantity": 0, "weight": 30},
+    "baton": {"u_name": "Батон", "quantity": 1, "weight": 15},
+    "sausage": {"u_name": "Ковбаса", "quantity": 1, "weight": 10},
     "can": {"u_name": 'Консерва "Сніданок Пацєти"', "quantity": 1, "weight": 10},
-    "vodka": {"u_name": 'Горілка "Пацятки"', "quantity": 1, "weight": 10},
+    "vodka": {"u_name": 'Горілка "Пацятки"', "quantity": 1, "weight": 5},
+    "energy": {"u_name": 'Енергетик "Нон Хрюк"', "quantity": 1, "weight": 10},
+    "low_saloid": {"u_name": "Малий шприц з салоїдами", "quantity": 1, "weight": 10},
+    "mid_saloid": {"u_name": "Шприц з салоїдами", "quantity": 1, "weight": 5},
+    "big_saloid": {"u_name": "Великий шприц з салоїдами", "quantity": 1, "weight": 3},
+    "strange_saloid": {"u_name": "Дивний шприц з салоїдами", "quantity": 1, "weight": 2},
 }
 # ===============================================
 
