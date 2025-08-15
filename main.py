@@ -459,7 +459,7 @@ def bounded_weight(old, delta):
 
 def pick_item_count():
     r = random.random()
-    if r < 0.50:
+    if r < 0.30:
         return 0
     if r < 0.80:
         return 1
